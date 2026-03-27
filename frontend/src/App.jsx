@@ -47,8 +47,10 @@ export default function App() {
   const [tab, setTab] = useState("info");
   const [pendingDeleteIds, setPendingDeleteIds] = useState([]);
 
-  async function fetchSessions(options = { silent: false, preserveUi: false }) {
-    const { silent, preserveUi } = options;
+  async function fetchSessions(options = { silent: false, preserveUi: false, auto: false }) {
+    const { silent, preserveUi, auto } = options;
+    if (auto) setAutoRefreshing(true);
+
     if (!silent) {
       setLoading(true);
       setError("");
