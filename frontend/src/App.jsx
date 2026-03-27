@@ -27,7 +27,10 @@ function formatSize(size = 0) {
 export default function App() {
   const [sessions, setSessions] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [autoRefreshing, setAutoRefreshing] = useState(false);
+  const [countdown, setCountdown] = useState(5);
   const [error, setError] = useState("");
+
 
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
@@ -72,8 +75,10 @@ export default function App() {
       if (!silent) setError(e.message || "加载失败");
     } finally {
       if (!silent) setLoading(false);
+      if (auto) setAutoRefreshing(false);
     }
   }
+
 
   useEffect(() => {
     fetchSessions();
@@ -81,10 +86,17 @@ export default function App() {
 
   useEffect(() => {
     const timer = setInterval(() => {
-      fetchSessions({ silent: true, preserveUi: true });
-    }, 5000);
+      setCountdown((prev) => {
+        if (prev <= 1) {
+          fetchSessions({ silent: true, preserveUi: true, auto: true });
+          return 5;
+        }
+        return prev - 1;
+      });
+    }, 1000);
     return () => clearInterval(timer);
   }, []);
+
 
   const filteredRows = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -273,9 +285,10 @@ export default function App() {
           <input type="date" value={dateTo} onChange={(e) => { setDateTo(e.target.value); setCurrentPage(1); }} />
         </div>
         <button onClick={clearFilters}>清除筛选</button>
-        <button onClick={() => fetchSessions()} disabled={loading}>{loading ? "刷新中..." : "刷新"}</button>
+        <button onClick={() => { setCountdown(5); fetchSessions(); }} disabled={loading}>{loading ? "刷新中..." : "刷新"}</button>
         <span className="countDisplay">显示 {filteredRows.length} / {sessions.length} 条</span>
-        <span className="auto-refresh-tip">自动刷新：5秒</span>
+        <span className={`auto-refresh-tip ${autoRefreshing ? "active" : ""}`}>{autoRefreshing ? "自动刷新中..." : `自动刷新倒计时：${countdown}s`}</span>
+
       </div>
 
       {selectedIds.size > 0 && (

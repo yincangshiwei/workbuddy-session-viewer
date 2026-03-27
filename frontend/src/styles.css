@@ -1,5 +1,6 @@
 * { box-sizing: border-box; margin: 0; padding: 0; }
-body { background: #1a202c; color: #e2e8f0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; font-size: 13px; }
+body { background: #1a202c; color: #e2e8f0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; font-size: 13px; padding-bottom: 56px; }
+
 
 .header { background: linear-gradient(135deg, #2d3748, #1a202c); padding: 20px 24px; border-bottom: 1px solid #2d3748; }
 .header h1 { font-size: 20px; color: #90cdf4; margin-bottom: 4px; }
@@ -21,7 +22,9 @@ body { background: #1a202c; color: #e2e8f0; font-family: -apple-system, BlinkMac
 .toolbar button { background: #2b6cb0; border: none; color: #fff; padding: 6px 14px; border-radius: 6px; cursor: pointer; font-size: 12px; }
 .toolbar .date-group { display: flex; gap: 6px; align-items: center; font-size: 12px; color: #718096; }
 .countDisplay { color: #718096; font-size: 12px; }
-.auto-refresh-tip { color: #63b3ed; font-size: 12px; margin-left: 2px; }
+.auto-refresh-tip { color: #63b3ed; font-size: 12px; margin-left: 2px; min-width: 150px; }
+.auto-refresh-tip.active { color: #f6ad55; }
+
 
 
 .batch-bar { display: none; padding: 10px 24px; background: #2c5282; border-bottom: 1px solid #2b6cb0; align-items: center; gap: 12px; }
@@ -100,7 +103,8 @@ tr:hover td { background: #2d3748; }
 .del-confirm-btn { background: #c53030; border: none; color: #fff; padding: 8px 20px; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 600; }
 .del-cancel-btn { background: #2d3748; border: 1px solid #4a5568; color: #e2e8f0; padding: 8px 20px; border-radius: 6px; cursor: pointer; font-size: 13px; }
 
-.pagination { display: flex; align-items: center; justify-content: flex-end; gap: 8px; padding: 10px 24px; border-top: 1px solid #2d3748; background: #1a202c; }
+.pagination { display: flex; align-items: center; justify-content: flex-end; gap: 8px; padding: 10px 24px; border-top: 1px solid #2d3748; background: #1a202c; position: fixed; left: 0; right: 0; bottom: 0; z-index: 30; }
+
 .pagination button { background: #2d3748; border: 1px solid #4a5568; color: #e2e8f0; padding: 4px 10px; border-radius: 6px; cursor: pointer; font-size: 12px; }
 .pagination button:disabled { opacity: 0.5; cursor: not-allowed; }
 .pagination span { color: #a0aec0; font-size: 12px; }
