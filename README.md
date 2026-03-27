@@ -19,7 +19,7 @@
 ```bash
 cd servers
 pip install -r requirements.txt
-uvicorn app.main:app --reload --host 0.0.0.0 --port 9877
+python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 9877
 ```
 
 后端接口：

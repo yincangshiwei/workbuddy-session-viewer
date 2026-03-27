@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import base64
 import json
 import os
-import sqlite3
 import shutil
+import sqlite3
 from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
@@ -15,9 +16,17 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 
-APPDATA = Path(os.getenv("APPDATA", r"C:\Users\yhadmin\AppData\Roaming"))
+def resolve_appdata() -> Path:
+    env_appdata = os.getenv("APPDATA")
+    if env_appdata:
+        return Path(env_appdata)
+    return Path.home() / "AppData" / "Roaming"
+
+
+APPDATA = resolve_appdata()
 WORKBUDDY_BASE = Path(os.getenv("WORKBUDDY_BASE", APPDATA / "WorkBuddy"))
 STORAGE_BASE = WORKBUDDY_BASE / "User" / "globalStorage" / "tencent-cloud.coding-copilot"
+
 
 SESSIONS_DB = Path(os.getenv("WORKBUDDY_SESSIONS_DB", WORKBUDDY_BASE / "codebuddy-sessions.vscdb"))
 TODOS_BASE = Path(os.getenv("WORKBUDDY_TODOS_BASE", STORAGE_BASE / "todos"))
@@ -49,6 +58,63 @@ def safe_json(path: Path) -> dict[str, Any] | None:
             return json.load(f)
     except Exception:
         return None
+
+
+def diff_html(diff_text: str) -> str:
+    if not diff_text:
+        return ""
+    out: list[str] = []
+    lines = diff_text.split("\n")
+    for line in lines[:200]:
+        esc = (
+            line.replace("&", "&amp;")
+            .replace("<", "&lt;")
+            .replace(">", "&gt;")
+            .replace('"', "&quot;")
+        )
+        if line.startswith("+++") or line.startswith("---"):
+            out.append(f'<span style="color:#63b3ed;font-weight:600">{esc}</span>')
+        elif line.startswith("+"):
+            out.append(f'<span style="color:#68d391">{esc}</span>')
+        elif line.startswith("-"):
+            out.append(f'<span style="color:#fc8181">{esc}</span>')
+        elif line.startswith("@@"):
+            out.append(f'<span style="color:#f6ad55">{esc}</span>')
+        else:
+            out.append(f'<span style="color:#a0aec0">{esc}</span>')
+    if len(lines) > 200:
+        out.append(f'<span style="color:#718096">... 还有 {len(lines)-200} 行 ...</span>')
+    return "\n".join(out)
+
+
+def decode_history_dir_name(name: str) -> str:
+    try:
+        b64 = name.replace("_", "/").replace("-", "+")
+        while len(b64) % 4:
+            b64 += "="
+        return base64.b64decode(b64).decode("utf-8", errors="replace").rstrip("\x00").rstrip("?")
+    except Exception:
+        return ""
+
+
+def build_delete_manifest(cid: str, hist_dir: str) -> list[dict[str, str]]:
+    items: list[dict[str, str]] = [
+        {"type": "db", "desc": f"sessions DB 记录: session:{cid}"}
+    ]
+    todo_file = TODOS_BASE / f"{cid}.json"
+    if todo_file.exists():
+        items.append({"type": "file", "desc": f"todos/{cid}.json"})
+
+    fc_dir = FC_BASE / cid
+    if fc_dir.is_dir():
+        items.append({"type": "dir", "desc": f"file-changes/{cid}/"})
+
+    if hist_dir:
+        conv_dir = HISTORY_BASE / hist_dir / "conversations" / cid
+        if conv_dir.is_dir():
+            items.append({"type": "dir", "desc": f"genie-history/.../conversations/{cid}/"})
+
+    return items
 
 
 def load_sessions() -> list[dict[str, Any]]:
@@ -115,22 +181,47 @@ def load_sessions() -> list[dict[str, Any]]:
                 if sid:
                     media_map.setdefault(sid, []).append(rec)
 
+    hist_dir_map: dict[str, str] = {}
+    if HISTORY_BASE.exists():
+        for d in HISTORY_BASE.iterdir():
+            if not d.is_dir():
+                continue
+            cwd = decode_history_dir_name(d.name)
+            if cwd:
+                hist_dir_map[cwd] = d.name
+
     result: list[dict[str, Any]] = []
     for s in sessions:
         cid = s.get("conversationId", "")
         cwd = s.get("cwd", "")
-        related = [
-            {
-                "conversationId": x.get("conversationId", ""),
-                "title": x.get("title", ""),
-                "status": x.get("status", ""),
-                "createdAt": x.get("createdAt", 0),
-                "updatedAt": x.get("updatedAt", 0),
-            }
-            for x in cwd_groups.get(cwd, [])
-            if x.get("conversationId") != cid
-        ]
         file_changes = fc_map.get(cid, [])
+
+        related = []
+        for x in cwd_groups.get(cwd, []):
+            rid = x.get("conversationId", "")
+            if rid == cid:
+                continue
+            related.append(
+                {
+                    "conversationId": rid,
+                    "title": x.get("title", ""),
+                    "status": x.get("status", ""),
+                    "createdAt": ts_to_text(x.get("createdAt", 0)),
+                    "updatedAt": ts_to_text(x.get("updatedAt", 0)),
+                    "todos": todos_map.get(rid, []),
+                    "fileChanges": [
+                        {
+                            "fileName": fc.get("fileName", ""),
+                            "changeType": fc.get("changeType", ""),
+                            "addedLines": fc.get("addedLines", 0),
+                            "removedLines": fc.get("removedLines", 0),
+                        }
+                        for fc in fc_map.get(rid, [])
+                    ],
+                }
+            )
+
+        hist_dir = hist_dir_map.get(cwd, "")
         result.append(
             {
                 "conversationId": cid,
@@ -147,6 +238,7 @@ def load_sessions() -> list[dict[str, Any]]:
                     {
                         **fc,
                         "timestampText": ts_to_text(fc.get("timestamp", 0)),
+                        "diffHtml": diff_html(fc.get("diff", "")),
                     }
                     for fc in file_changes
                 ],
@@ -159,6 +251,7 @@ def load_sessions() -> list[dict[str, Any]]:
                     for m in media_map.get(cid, [])
                 ],
                 "related": related,
+                "deleteManifest": build_delete_manifest(cid, hist_dir),
             }
         )
 
