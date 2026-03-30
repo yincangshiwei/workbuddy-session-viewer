@@ -7,12 +7,46 @@
 - `servers/`：后端服务（FastAPI）
 - `frontend/`：前端项目（React + Vite）
 
+后端当前采用按职责分层：
+
+```text
+servers/
+  app/
+    main.py                 # 应用装配（FastAPI/CORS/静态托管）
+    api/
+      router.py             # API 总路由聚合
+      routes/
+        health.py           # 健康检查
+        sessions.py         # 会话列表
+        chat.py             # 会话聊天记录
+        transfer.py         # 导入/导出
+        delete.py           # 删除会话
+    services/
+      common.py             # 通用工具（时间/JSON/transcript索引等）
+      session_service.py    # sessions 业务聚合
+      chat_service.py       # chat 读取与解析
+      export_service.py     # 导出（原始会话/HTML）
+      import_service.py     # ZIP 导入
+      delete_service.py     # DB与本地文件删除
+    schemas/
+      session.py            # 请求/响应模型
+    core/
+      settings.py           # 环境变量与路径配置
+```
+
 ## 后端（servers）
 
 ### 技术栈
 
 - FastAPI
 - Uvicorn
+
+### 架构约定（维护建议）
+
+- `routes`：仅处理 HTTP 协议（参数校验、状态码、响应结构）
+- `services`：承载业务逻辑（会话聚合、导入导出、删除流程）
+- `schemas`：统一请求/响应模型，减少隐式字段漂移
+- `core`：集中管理环境变量与路径，避免硬编码散落
 
 ### 启动（开发）
 
@@ -27,8 +61,10 @@ python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 9877
 - `GET /api/health`
 - `GET /api/sessions`：读取并聚合本地会话基础数据
 - `GET /api/session/{conversationId}/chat`：读取指定会话的完整聊天记录（用户/AI/工具消息）
+- `POST /api/export`：导出会话归档 ZIP
+- `POST /api/export-chat`：导出聊天 HTML + 媒体文件 ZIP
+- `POST /api/import`：导入会话归档 ZIP
 - `POST /api/delete`：删除会话及本地关联数据
-
 
 ## 前端（frontend）
 
@@ -36,6 +72,35 @@ python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 9877
 
 - React 18
 - Vite 5
+
+### 当前前端模块结构
+
+```text
+frontend/
+  src/
+    App.jsx                      # 页面容器：状态编排与业务流转
+    main.jsx                     # 应用入口
+    styles.css                   # 全局样式
+    constants/
+      session.js                 # 会话页面常量（分页大小、状态色）
+    utils/
+      session.js                 # 会话页面工具函数（复制/格式化/文本提取）
+    components/
+      SessionHeader.jsx          # 顶部标题区
+      SessionStats.jsx           # 统计卡片区
+      SessionToolbar.jsx         # 筛选与操作栏
+      SessionTable.jsx           # 会话表格
+      Pagination.jsx             # 分页条
+      SessionDetailModal.jsx     # 会话详情弹窗
+      DeleteConfirmModal.jsx     # 删除确认弹窗
+```
+
+### 架构约定（维护建议）
+
+- `App.jsx`：只做页面级状态管理、接口编排、组件组装
+- `components/*`：只负责展示与交互，不承载跨模块业务逻辑
+- `utils/*`：沉淀纯函数，避免在组件中重复实现
+- `constants/*`：集中维护页面常量，避免魔法数字/字符串散落
 
 ### 启动（开发）
 
