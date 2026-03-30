@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+
 
 const STATUS_COLORS = {
   completed: "#68d391",
@@ -24,6 +25,15 @@ function formatSize(size = 0) {
   return `${size}B`;
 }
 
+function prettyJson(value) {
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value ?? "");
+  }
+}
+
+
 export default function App() {
   const [sessions, setSessions] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -46,9 +56,17 @@ export default function App() {
   const [detail, setDetail] = useState(null);
   const [tab, setTab] = useState("info");
   const [pendingDeleteIds, setPendingDeleteIds] = useState([]);
+  const [chatLoading, setChatLoading] = useState(false);
+  const [chatError, setChatError] = useState("");
+  const [chatMap, setChatMap] = useState({});
+  const fileInputRef = useRef(null);
 
-  async function fetchSessions(options = { silent: false, preserveUi: false, auto: false }) {
-    const { silent, preserveUi, auto } = options;
+
+  async function fetchSessions(options = { silent: false, preserveUi: false, auto: false, resetPage: false }) {
+
+
+    const { silent, preserveUi, auto, resetPage } = options;
+
     if (auto) setAutoRefreshing(true);
 
     if (!silent) {
@@ -56,13 +74,16 @@ export default function App() {
       setError("");
     }
     try {
-      const resp = await fetch("/api/sessions");
+      const resp = await fetch(`/api/sessions?_t=${Date.now()}`, { cache: "no-store" });
+
       if (!resp.ok) throw new Error(`请求失败: ${resp.status}`);
       const data = await resp.json();
       const nextSessions = data.sessions || [];
       const idSet = new Set(nextSessions.map((x) => x.conversationId));
 
       setSessions(nextSessions);
+      if (resetPage) setCurrentPage(1);
+
       if (preserveUi) {
         setSelectedIds((prev) => new Set([...prev].filter((id) => idSet.has(id))));
         setDetail((prev) => {
@@ -99,8 +120,48 @@ export default function App() {
     return () => clearInterval(timer);
   }, []);
 
+  useEffect(() => {
+    if (!detail) return;
+    const onKeyDown = (e) => {
+      if (e.key === "Escape") setDetail(null);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [detail]);
+
+  useEffect(() => {
+
+    if (!detail || tab !== "chat") return;
+    if (chatMap[detail.conversationId]) return;
+    let cancelled = false;
+
+    async function fetchChat() {
+      setChatLoading(true);
+      setChatError("");
+      try {
+        const resp = await fetch(`/api/session/${encodeURIComponent(detail.conversationId)}/chat?_t=${Date.now()}`, { cache: "no-store" });
+
+        const data = await resp.json();
+        if (!resp.ok) throw new Error(data?.detail || `请求失败: ${resp.status}`);
+        if (!cancelled) {
+          setChatMap((prev) => ({ ...prev, [detail.conversationId]: data }));
+        }
+      } catch (e) {
+        if (!cancelled) setChatError(e.message || "加载对话失败");
+      } finally {
+        if (!cancelled) setChatLoading(false);
+      }
+    }
+
+    fetchChat();
+    return () => {
+      cancelled = true;
+    };
+  }, [detail, tab, chatMap]);
+
 
   const filteredRows = useMemo(() => {
+
     const q = search.trim().toLowerCase();
     let rows = sessions.filter((s) => {
       const title = (s.title || "").toLowerCase();
@@ -238,7 +299,72 @@ export default function App() {
     }
   }
 
+  async function exportSelected() {
+    const ids = Array.from(selectedIds);
+    if (!ids.length) {
+      setError("请先勾选要导出的会话");
+      return;
+    }
+
+    setLoading(true);
+    setError("");
+    try {
+      const resp = await fetch("/api/export", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids }),
+      });
+      if (!resp.ok) {
+        const data = await resp.json().catch(() => ({}));
+        throw new Error(data?.detail || `导出失败: ${resp.status}`);
+      }
+
+      const blob = await resp.blob();
+      const disposition = resp.headers.get("content-disposition") || "";
+      const m = disposition.match(/filename="([^"]+)"/i);
+      const fileName = m?.[1] || `workbuddy-export-${Date.now()}.zip`;
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = fileName;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      setError(e.message || "导出失败");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function onImportFileChange(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setLoading(true);
+    setError("");
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      const resp = await fetch("/api/import", { method: "POST", body: form });
+      const data = await resp.json();
+      if (!resp.ok || !data?.success) {
+        throw new Error(data?.detail || data?.error || `导入失败: ${resp.status}`);
+      }
+      await fetchSessions({ silent: false, preserveUi: false, auto: false });
+      setSelectedIds(new Set());
+      window.alert(`导入完成：${data.count || 0} 条会话`);
+    } catch (err) {
+      setError(err.message || "导入失败");
+    } finally {
+      setLoading(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  }
+
   const pendingManifest = useMemo(() => {
+
     const map = new Map(sessions.map((x) => [x.conversationId, x]));
     const items = [];
     pendingDeleteIds.forEach((id) => {
@@ -249,8 +375,13 @@ export default function App() {
   }, [pendingDeleteIds, sessions]);
 
   const allCheckedOnPage = pageRows.length > 0 && pageRows.every((x) => selectedIds.has(x.conversationId));
+  const currentChat = detail ? chatMap[detail.conversationId] : null;
+  const currentChatMessages = currentChat?.messages || [];
+  const firstChatTime = currentChatMessages[0]?.createdAt || "-";
+  const lastChatTime = currentChatMessages[currentChatMessages.length - 1]?.createdAt || "-";
 
   return (
+
     <>
       <div className="header">
         <h1>WorkBuddy 任务会话</h1>
@@ -287,21 +418,21 @@ export default function App() {
           <input type="date" value={dateTo} onChange={(e) => { setDateTo(e.target.value); setCurrentPage(1); }} />
         </div>
         <button onClick={clearFilters}>清除筛选</button>
-        <button onClick={() => { setCountdown(5); fetchSessions(); }} disabled={loading}>{loading ? "刷新中..." : "刷新"}</button>
+        <button onClick={() => { setCountdown(5); fetchSessions({ resetPage: true }); }} disabled={loading}>{loading ? "处理中..." : "刷新"}</button>
+
+        <button onClick={() => fileInputRef.current?.click()} disabled={loading}>导入</button>
+        <button onClick={exportSelected} disabled={loading || selectedIds.size === 0}>导出已选({selectedIds.size})</button>
+        <button className="btn-danger" onClick={() => openDelete(Array.from(selectedIds))} disabled={loading || selectedIds.size === 0}>批量删除({selectedIds.size})</button>
+        <input ref={fileInputRef} type="file" accept=".zip" style={{ display: "none" }} onChange={onImportFileChange} />
         <span className="countDisplay">显示 {filteredRows.length} / {sessions.length} 条</span>
+
+
         <span className={`auto-refresh-tip ${autoRefreshing ? "active" : ""}`}>{autoRefreshing ? "自动刷新中..." : `自动刷新倒计时：${countdown}s`}</span>
 
       </div>
 
-      {selectedIds.size > 0 && (
-        <div className="batch-bar visible">
-          <span>已选 {selectedIds.size} 条</span>
-          <button className="batch-del-btn" onClick={() => openDelete(Array.from(selectedIds))}>🗑 批量删除</button>
-          <button className="batch-cancel" onClick={() => setSelectedIds(new Set())}>取消选择</button>
-        </div>
-      )}
-
       {error ? <div className="error">{error}</div> : null}
+
 
       <div className="table-wrap">
         <table>
@@ -315,6 +446,8 @@ export default function App() {
               <th onClick={() => sortBy("cwd")}>工作目录 <span className="sort-icon">↕</span></th>
               <th onClick={() => sortBy("created")}>创建时间 <span className="sort-icon">↕</span></th>
               <th style={{ width: 130, textAlign: "center" }}>操作</th>
+
+
             </tr>
           </thead>
           <tbody>
@@ -329,11 +462,23 @@ export default function App() {
               const totalRm = fileChanges.reduce((a, f) => a + (f.removedLines || 0), 0);
               const spaceName = (s.cwd || "").split(/[\\/]/).filter(Boolean).pop() || "";
               return (
-                <tr key={s.conversationId}>
-                  <td><input type="checkbox" checked={selectedIds.has(s.conversationId)} onChange={() => toggleOne(s.conversationId)} /></td>
+                <tr
+                  key={s.conversationId}
+                  className={selectedIds.has(s.conversationId) ? "row-selected" : ""}
+                  onClick={() => toggleOne(s.conversationId)}
+                  onDoubleClick={() => { setDetail(s); setTab("info"); }}
+                >
                   <td>
-                    <div className="title-link" onClick={() => { setDetail(s); setTab("info"); }}>{s.title || "(无标题)"}</div>
-                    <div className="sub">ID: {(s.conversationId || "").slice(0, 16)}...</div>
+                    <input
+                      type="checkbox"
+                      checked={selectedIds.has(s.conversationId)}
+                      onClick={(e) => e.stopPropagation()}
+                      onChange={() => toggleOne(s.conversationId)}
+                    />
+                  </td>
+                  <td>
+                    <div className="title-link">{s.title || "(无标题)"}</div>
+                    <div className="sub">ID: {(s.conversationId || "").slice(0, 16)}...（双击查看详情）</div>
                     <div className="sub">{s.createdAt || ""}</div>
                     {todos.length > 0 ? <div className="small">📋 {done}/{todos.length} 完成</div> : null}
                     {fileChanges.length > 0 ? <div className="small"><span className="c-ok">+{totalAdd}</span> <span className="c-err">-{totalRm}</span> <span className="sub">({fileChanges.length} 文件)</span></div> : null}
@@ -346,11 +491,13 @@ export default function App() {
                   </td>
                   <td>{s.createdAt || ""}</td>
                   <td style={{ textAlign: "center", whiteSpace: "nowrap" }}>
-                    <button className="btn-outline" onClick={() => { setDetail(s); setTab("info"); }}>详情</button>
-                    <button className="btn-danger" onClick={() => openDelete([s.conversationId])}>删除</button>
+                    <button className="btn-outline" onClick={(e) => { e.stopPropagation(); setDetail(s); setTab("info"); }}>详情</button>
+                    <button className="btn-danger" onClick={(e) => { e.stopPropagation(); openDelete([s.conversationId]); }}>删除</button>
                   </td>
+
                 </tr>
               );
+
             })}
             {pageRows.length === 0 && (
               <tr>
@@ -381,11 +528,13 @@ export default function App() {
             </div>
             <div className="modal-tabs">
               <div className={`modal-tab ${tab === "info" ? "active" : ""}`} onClick={() => setTab("info")}>📋 基本信息</div>
+              <div className={`modal-tab ${tab === "chat" ? "active" : ""}`} onClick={() => setTab("chat")}>💬 对话 ({chatMap[detail.conversationId]?.messageCount || 0})</div>
               <div className={`modal-tab ${tab === "todos" ? "active" : ""}`} onClick={() => setTab("todos")}>✅ Todos ({detail.todos?.length || 0})</div>
               <div className={`modal-tab ${tab === "files" ? "active" : ""}`} onClick={() => setTab("files")}>📁 文件变更 ({detail.fileChanges?.length || 0})</div>
               <div className={`modal-tab ${tab === "related" ? "active" : ""}`} onClick={() => setTab("related")}>🔗 关联对话 ({detail.related?.length || 0})</div>
               <div className={`modal-tab ${tab === "media" ? "active" : ""}`} onClick={() => setTab("media")}>🖼 媒体文件 ({detail.mediaFiles?.length || 0})</div>
             </div>
+
             <div className="modal-body">
               {tab === "info" && (
                 <div className="tab-content active">
@@ -399,6 +548,39 @@ export default function App() {
                 </div>
               )}
 
+              {tab === "chat" && (
+                <div className="tab-content active">
+                  {chatLoading ? <div className="empty-state">对话加载中...</div> : null}
+                  {!chatLoading && chatError ? <div className="error">{chatError}</div> : null}
+                  {!chatLoading && !chatError && !currentChatMessages.length ? <div className="empty-state">📭 暂无对话记录</div> : null}
+                  {!chatLoading && !chatError && currentChatMessages.length > 0 ? (
+                    <div className="chat-summary">对话时间：{firstChatTime} ~ {lastChatTime}（共 {currentChatMessages.length} 条）</div>
+                  ) : null}
+                  {!chatLoading && !chatError && currentChatMessages.map((m, i) => (
+                    <div className={`chat-item role-${m.role || "unknown"}`} key={m.id || `${m.role || "unknown"}-${i}`}>
+                      <div className="chat-meta">{m.role || "unknown"} · {m.id} · {m.createdAt || "-"}</div>
+                      {m.text ? <pre className="chat-text">{m.text}</pre> : null}
+                      {!m.text && !(m.toolEvents || []).length ? <pre className="chat-text">(无文本内容)</pre> : null}
+                      {(m.toolEvents || []).length > 0 && (
+
+                        <div className="tool-event-list">
+                          {(m.toolEvents || []).map((evt, ti) => (
+                            <div className="tool-event" key={`${m.id || i}-tool-${ti}`}>
+                              <div className="tool-event-title">
+                                {evt.type === "tool-call" ? "工具调用" : "工具结果"} · {evt.toolName || "-"} · {evt.toolCallId || "-"}
+                                {evt.isError ? " · error" : ""}
+                              </div>
+                              <pre className="tool-event-body">{prettyJson(evt.type === "tool-call" ? evt.args : evt.result)}</pre>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+
+
               {tab === "todos" && (
                 <div className="tab-content active">
                   {(detail.todos || []).length === 0 ? <div className="empty-state">📭 暂无 Todo 数据</div> : (detail.todos || []).map((t, i) => (
@@ -410,6 +592,7 @@ export default function App() {
                   ))}
                 </div>
               )}
+
 
               {tab === "files" && (
                 <div className="tab-content active">
@@ -432,9 +615,10 @@ export default function App() {
                   {(detail.related || []).length === 0 ? <div className="empty-state">📭 此工作目录只有本任务</div> : (detail.related || []).map((r) => (
                     <div className="related-item" key={r.conversationId}>
                       <div className="related-title">{r.title || "(无标题)"}</div>
-                      <div className="related-meta">{r.status} · {r.createdAt}</div>
+                      <div className="related-meta">{r.status} · 创建: {r.createdAt || "-"} · 更新: {r.updatedAt || "-"}</div>
                       <div className="mono sub">{r.conversationId}</div>
                     </div>
+
                   ))}
                 </div>
               )}
