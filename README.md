@@ -62,7 +62,10 @@ python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 9877
 - `GET /api/sessions`：读取并聚合本地会话基础数据
 - `GET /api/session/{conversationId}/chat`：读取指定会话的完整聊天记录（用户/AI/工具消息）
 - `POST /api/export`：导出会话归档 ZIP
-- `POST /api/export-chat`：导出聊天 HTML + 媒体文件 ZIP
+- `POST /api/export-chat`：导出聊天 HTML + 媒体文件/工作目录文件 ZIP
+- `GET /api/local/workspace-files`：读取指定 `cwd` 的工作目录文件数据
+- `GET /api/local/open-file`：打开本地文件（浏览器内联）
+- `POST /api/local/locate-file`：在系统文件管理器中定位文件
 - `POST /api/import`：导入会话归档 ZIP
 - `POST /api/delete`：删除会话及本地关联数据
 
@@ -161,10 +164,26 @@ npm run build
 | `messageCount` | 消息总数 | `index.json.messages` 长度 |
 | `messages[*].id` | 消息ID | `index.json.messages[*].id` |
 | `messages[*].role` | 角色（`user`/`assistant`/`tool`） | `index.json.messages[*].role` |
+| `messages[*].type` | 消息类型 | `index.json.messages[*].type` |
 | `messages[*].isComplete` | 是否完整 | `index.json.messages[*].isComplete` |
+| `messages[*].createdAtTs` / `createdAt` | 消息时间戳/文本时间 | `messages/{messageId}.json` 文件创建时间（后端换算） |
+| `messages[*].requestId` | 请求ID（若存在） | `messages/{messageId}.json` -> `extra.requestId` |
+| `messages[*].modelId` / `modelName` / `mode` | 模型标识、模型名、会话模式 | `messages/{messageId}.json` -> `extra` / `extra.sourceContentBlocks[*]._meta.codebuddy.ai` |
 | `messages[*].text` | 文本化消息内容（含工具调用标识） | `messages/{messageId}.json` -> `message`(JSON字符串) -> `content[*]` |
-| `messages[*].raw` | 原始消息对象（透传） | 同上 |
+| `messages[*].toolEvents` | 工具调用/结果事件数组 | 同上 `content[*]` 解析 |
+| `messages[*].messagePath` | 本地消息文件绝对路径 | `messages/{messageId}.json` |
+| `messages[*].raw` | 原始消息对象（透传） | `messages/{messageId}.json` -> `message` 反序列化结果 |
 | `requests` | 请求分组与token统计 | `index.json.requests` |
+
+### 工作目录文件（`GET /api/local/workspace-files`）
+
+| 页面字段 | 返回字段 | 来源位置 |
+|---|---|---|
+| 工作目录路径 | `cwd` | 请求参数 `cwd` 对应的本地目录绝对路径 |
+| 工作目录文件数量（Tab） | `fileCount` | 后端递归扫描 `cwd` 下全部文件计数 |
+| 工作目录目录数量（详情） | `dirCount` | 后端递归扫描 `cwd` 下全部子目录计数 |
+| 工作目录文件列表 | `tree.children`（前端扁平化后展示） | 本地文件系统目录树（按名称排序） |
+| 文件名/相对路径/大小 | `tree.children[*].name` / `relativePath` / `size` | 本地文件系统文件元数据 |
 
 ## 根目录快捷命令
 

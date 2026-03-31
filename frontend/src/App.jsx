@@ -7,7 +7,9 @@ import SessionHeader from "./components/SessionHeader";
 import SessionStats from "./components/SessionStats";
 import SessionTable from "./components/SessionTable";
 import SessionToolbar from "./components/SessionToolbar";
+import ModelConfigPanel from "./components/ModelConfigPanel";
 import { PAGE_SIZE } from "./constants/session";
+
 import { copyToClipboard, extractUserQuery } from "./utils/session";
 
 export default function App() {
@@ -36,6 +38,12 @@ export default function App() {
   const [chatMap, setChatMap] = useState({});
   const [chatViewMode, setChatViewMode] = useState("basic");
   const [copiedId, setCopiedId] = useState(null);
+  const [workspaceLoading, setWorkspaceLoading] = useState(false);
+  const [workspaceError, setWorkspaceError] = useState("");
+  const [workspaceMap, setWorkspaceMap] = useState({});
+  const [activePage, setActivePage] = useState("sessions");
+
+
 
   async function fetchChat(conversationId) {
     if (!conversationId) return;
@@ -53,13 +61,33 @@ export default function App() {
     }
   }
 
+  async function fetchWorkspace(cwd) {
+    if (!cwd) return;
+    setWorkspaceLoading(true);
+    setWorkspaceError("");
+    try {
+      const resp = await fetch(`/api/local/workspace-files?cwd=${encodeURIComponent(cwd)}&_t=${Date.now()}`, { cache: "no-store" });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data?.detail || `请求失败: ${resp.status}`);
+      setWorkspaceMap((prev) => ({ ...prev, [cwd]: data }));
+    } catch (e) {
+      setWorkspaceError(e.message || "加载工作目录文件失败");
+    } finally {
+      setWorkspaceLoading(false);
+    }
+  }
+
+
   function openDetail(session, nextTab = "info") {
     if (!session) return;
     setChatError("");
+    setWorkspaceError("");
     setChatLoading(!chatMap[session.conversationId]);
+    setWorkspaceLoading(!!session.cwd && !workspaceMap[session.cwd]);
     setDetail(session);
     setTab(nextTab);
   }
+
 
 
   async function fetchSessions(options = { silent: false, preserveUi: false, auto: false, resetPage: false }) {
@@ -130,6 +158,14 @@ export default function App() {
     if (chatMap[detail.conversationId]) return;
     fetchChat(detail.conversationId);
   }, [detail, chatMap]);
+
+  useEffect(() => {
+    if (!detail) return;
+    const cwd = detail.cwd || "";
+    if (!cwd || workspaceMap[cwd]) return;
+    fetchWorkspace(cwd);
+  }, [detail, workspaceMap]);
+
 
   const filteredRows = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -329,6 +365,8 @@ export default function App() {
   const allCheckedOnPage = pageRows.length > 0 && pageRows.every((x) => selectedIds.has(x.conversationId));
   const currentChat = detail ? chatMap[detail.conversationId] : null;
   const currentChatMessages = currentChat?.messages || [];
+  const currentWorkspace = detail?.cwd ? workspaceMap[detail.cwd] : null;
+
 
   const basicChatMessages = useMemo(() => {
     return currentChatMessages.filter((m) => (m.role === "user" || m.role === "assistant") && (m.text || "").trim());
@@ -348,75 +386,86 @@ export default function App() {
 
   return (
     <>
-      <SessionHeader />
+      <SessionHeader activePage={activePage} setActivePage={setActivePage} />
 
-      <SessionStats stats={stats} />
+      {activePage === "models" ? (
+        <ModelConfigPanel />
+      ) : (
+        <>
+          <SessionStats stats={stats} />
 
-      <SessionToolbar
-        search={search}
-        setSearch={(v) => { setSearch(v); setCurrentPage(1); }}
-        statusFilter={statusFilter}
-        setStatusFilter={(v) => { setStatusFilter(v); setCurrentPage(1); }}
-        cwdFilter={cwdFilter}
-        setCwdFilter={(v) => { setCwdFilter(v); setCurrentPage(1); }}
-        dateFrom={dateFrom}
-        setDateFrom={(v) => { setDateFrom(v); setCurrentPage(1); }}
-        dateTo={dateTo}
-        setDateTo={(v) => { setDateTo(v); setCurrentPage(1); }}
-        clearFilters={clearFilters}
-        refresh={() => { setCountdown(5); fetchSessions({ resetPage: true }); }}
-        loading={loading}
-        exportSelected={exportSelected}
-        selectedCount={selectedIds.size}
-        openDeleteSelected={() => openDelete(Array.from(selectedIds))}
-        filteredCount={filteredRows.length}
-        totalCount={sessions.length}
-        autoRefreshing={autoRefreshing}
-        countdown={countdown}
-      />
+          <SessionToolbar
+            search={search}
+            setSearch={(v) => { setSearch(v); setCurrentPage(1); }}
+            statusFilter={statusFilter}
+            setStatusFilter={(v) => { setStatusFilter(v); setCurrentPage(1); }}
+            cwdFilter={cwdFilter}
+            setCwdFilter={(v) => { setCwdFilter(v); setCurrentPage(1); }}
+            dateFrom={dateFrom}
+            setDateFrom={(v) => { setDateFrom(v); setCurrentPage(1); }}
+            dateTo={dateTo}
+            setDateTo={(v) => { setDateTo(v); setCurrentPage(1); }}
+            clearFilters={clearFilters}
+            refresh={() => { setCountdown(5); fetchSessions({ resetPage: true }); }}
+            loading={loading}
+            exportSelected={exportSelected}
+            selectedCount={selectedIds.size}
+            openDeleteSelected={() => openDelete(Array.from(selectedIds))}
+            filteredCount={filteredRows.length}
+            totalCount={sessions.length}
+            autoRefreshing={autoRefreshing}
+            countdown={countdown}
+          />
 
-      {error ? <div className="error">{error}</div> : null}
+          {error ? <div className="error">{error}</div> : null}
 
-      <SessionTable
-        pageRows={pageRows}
-        selectedIds={selectedIds}
-        allCheckedOnPage={allCheckedOnPage}
-        toggleAll={toggleAll}
-        toggleOne={toggleOne}
-        sortBy={sortBy}
-        openDetail={openDetail}
-        exportOne={exportOne}
-        openDelete={openDelete}
-      />
+          <SessionTable
+            pageRows={pageRows}
+            selectedIds={selectedIds}
+            allCheckedOnPage={allCheckedOnPage}
+            toggleAll={toggleAll}
+            toggleOne={toggleOne}
+            sortBy={sortBy}
+            openDetail={openDetail}
+            exportOne={exportOne}
+            openDelete={openDelete}
+          />
 
-      <Pagination currentPage={currentPage} totalPages={totalPages} setCurrentPage={setCurrentPage} />
+          <Pagination currentPage={currentPage} totalPages={totalPages} setCurrentPage={setCurrentPage} />
 
-      <SessionDetailModal
-        detail={detail}
-        setDetail={setDetail}
-        tab={tab}
-        setTab={setTab}
-        openDelete={openDelete}
-        chatMap={chatMap}
-        chatLoading={chatLoading}
-        chatError={chatError}
-        chatViewMode={chatViewMode}
-        setChatViewMode={setChatViewMode}
-        basicChatMessages={basicChatMessages}
-        basicChatText={basicChatText}
-        copiedId={copiedId}
-        setCopiedId={setCopiedId}
-        copyToClipboard={copyToClipboard}
-      />
+          <SessionDetailModal
+            detail={detail}
+            setDetail={setDetail}
+            tab={tab}
+            setTab={setTab}
+            openDelete={openDelete}
+            chatMap={chatMap}
+            chatLoading={chatLoading}
+            chatError={chatError}
+            chatViewMode={chatViewMode}
+            setChatViewMode={setChatViewMode}
+            basicChatMessages={basicChatMessages}
+            basicChatText={basicChatText}
+            copiedId={copiedId}
+            setCopiedId={setCopiedId}
+            copyToClipboard={copyToClipboard}
+            workspaceData={currentWorkspace}
+            workspaceLoading={workspaceLoading}
+            workspaceError={workspaceError}
+          />
 
-      <DeleteConfirmModal
-        pendingDeleteIds={pendingDeleteIds}
-        closeDelete={closeDelete}
-        sessions={sessions}
-        pendingManifest={pendingManifest}
-        executeDelete={executeDelete}
-        loading={loading}
-      />
+          <DeleteConfirmModal
+            pendingDeleteIds={pendingDeleteIds}
+            closeDelete={closeDelete}
+            sessions={sessions}
+            pendingManifest={pendingManifest}
+            executeDelete={executeDelete}
+            loading={loading}
+          />
+        </>
+      )}
     </>
   );
 }
+
+

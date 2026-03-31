@@ -52,7 +52,36 @@ def collect_media_records(cid: str) -> list[dict[str, Any]]:
     return records
 
 
+def collect_workspace_files(cwd: str) -> list[dict[str, Any]]:
+    files: list[dict[str, Any]] = []
+    root = Path(cwd or "")
+    if not root.exists() or not root.is_dir():
+        return files
+
+    for file_path in root.rglob("*"):
+        if not file_path.is_file() or file_path.is_symlink():
+            continue
+        rel = str(file_path.relative_to(root)).replace("\\", "/")
+        size = 0
+        try:
+            size = file_path.stat().st_size
+        except Exception:
+            size = 0
+        files.append(
+            {
+                "name": file_path.name,
+                "relativePath": rel,
+                "localPath": str(file_path),
+                "size": size,
+            }
+        )
+
+    files.sort(key=lambda x: str(x.get("relativePath", "")).lower())
+    return files
+
+
 def build_export_zip(ids: list[str]) -> bytes:
+
     uniq_ids = [x for x in dict.fromkeys(ids) if x]
     session_map = load_session_values(uniq_ids)
 
@@ -160,6 +189,9 @@ def _build_basic_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]
                 "text": display_text or text,
                 "rawText": text,
                 "toolEvents": m.get("toolEvents", []),
+                "modelId": str(m.get("modelId", "") or ""),
+                "modelName": str(m.get("modelName", "") or ""),
+                "mode": str(m.get("mode", "") or ""),
             }
         )
     return basic
@@ -540,6 +572,7 @@ def generate_chat_html(
     show_back_link: bool = True,
     back_href: str = "../../index.html",
 ) -> str:
+
     basic_messages = _build_basic_messages(messages)
 
     normalized_full = []
@@ -551,6 +584,9 @@ def generate_chat_html(
                 "createdAt": str(m.get("createdAt", "") or ""),
                 "text": str(m.get("text", "") or ""),
                 "toolEvents": m.get("toolEvents", []),
+                "modelId": str(m.get("modelId", "") or ""),
+                "modelName": str(m.get("modelName", "") or ""),
+                "mode": str(m.get("mode", "") or ""),
             }
         )
 
@@ -727,6 +763,18 @@ def generate_chat_html(
     .bubble.assistant .role {{ color:#86efac; }}
     .bubble.tool .role,.bubble.unknown .role {{ color:var(--purple); }}
     .time {{ color:var(--muted); font-size:12px; }}
+    .model-tag {{
+      font-size:11px;
+      color:#c4b5fd;
+      border:1px solid rgba(167,139,250,0.35);
+      background:rgba(167,139,250,0.12);
+      border-radius:999px;
+      padding:2px 8px;
+      max-width:260px;
+      overflow:hidden;
+      text-overflow:ellipsis;
+      white-space:nowrap;
+    }}
     .id {{
       color:var(--muted); font-size:11px; margin-left:auto;
       font-family:'JetBrains Mono',monospace; max-width:180px;
@@ -809,8 +857,33 @@ def generate_chat_html(
       transition:background .2s ease,border-color .2s ease;
     }}
     .link:hover {{ border-color:#394353; background:#252d38; }}
+    .workspace-path-card {{
+      border:1px solid var(--border);
+      border-radius:12px;
+      background:var(--surface-soft);
+      padding:12px;
+      display:flex;
+      flex-direction:column;
+      gap:10px;
+    }}
+    .workspace-path-label {{ color:var(--muted); font-size:12px; }}
+    .workspace-path-row {{ display:flex; gap:8px; align-items:center; }}
+    .workspace-path-value {{
+      min-width:0;
+      flex:1;
+      font-size:12px;
+      color:var(--text);
+      font-family:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+      padding:8px 10px;
+      border:1px solid var(--border);
+      border-radius:8px;
+      background:#202730;
+      word-break:break-all;
+    }}
+
 
     .empty {{
+
       color:var(--muted); font-size:14px;
       border:1px dashed var(--border);
       border-radius:12px; padding:28px;
@@ -906,7 +979,22 @@ def generate_chat_html(
           <span style="color:var(--muted);font-size:13px;font-weight:600">{len(media_files)} 个</span>
         </div>
         <div id="mediaList" class="media-list"></div>
+
+        <div class="panel-header" style="margin-top:14px">
+          <h3 class="panel-title">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7h5l2 2h11v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"></path></svg>
+            工作目录
+          </h3>
+        </div>
+        <div class="workspace-path-card">
+          <div class="workspace-path-label">工作目录路径</div>
+          <div class="workspace-path-row">
+            <div id="workspacePathValue" class="workspace-path-value"></div>
+            <button id="btnCopyWorkspacePath" class="btn-action" type="button" onclick="copyWorkspacePath()">复制目录</button>
+          </div>
+        </div>
       </aside>
+
     </section>
   </div>
 
@@ -928,7 +1016,9 @@ def generate_chat_html(
     var FULL_MESSAGES = decodeB64Json('{_json_to_b64(normalized_full)}');
     var BASIC_MESSAGES = decodeB64Json('{_json_to_b64(basic_messages)}');
     var MEDIA_FILES = decodeB64Json('{_json_to_b64(media_files)}');
+    var WORKSPACE_DIR_NAME = 'workspace';
     var currentView = 'basic';
+
     var searchQuery = '';
 
     document.getElementById('searchMsg').addEventListener('input', function(e) {{
@@ -961,6 +1051,16 @@ def generate_chat_html(
       }} catch (e) {{
         return String(content == null ? '(空内容)' : content);
       }}
+    }}
+
+    function modelLabel(msg) {{
+      var name = String((msg && msg.modelName) || '').trim();
+      var id = String((msg && msg.modelId) || '').trim();
+      var mode = String((msg && msg.mode) || '').trim();
+      var model = name || id;
+      if (!model && !mode) return '';
+      if (model && mode) return model + ' / ' + mode;
+      return model || mode;
     }}
 
     function displayText(msg) {{
@@ -1055,6 +1155,8 @@ def generate_chat_html(
         var role = String((m && m.role) || 'unknown');
         var toolEvents = Array.isArray(m && m.toolEvents) ? m.toolEvents : [];
         var toolsHtml = '';
+        var model = modelLabel(m);
+        var modelHtml = model ? '<span class="model-tag">' + safe(model) + '</span>' : '';
         var toggleBtn = role === 'tool' ? '<button class="bubble-toggle" type="button" onclick="toggleBubble(this)">展开</button>' : '';
         if (currentView === 'full' && role !== 'tool' && toolEvents.length) {{
           toolsHtml = '<div class="tool-events">' + toolEvents.map(function (evt) {{
@@ -1079,6 +1181,7 @@ def generate_chat_html(
           '<div class="bubble-head">' +
             '<span class="role">' + safe(roleLabel(role)) + '</span>' +
             '<span class="time">' + safe((m && m.createdAt) || '-') + '</span>' +
+            modelHtml +
             toggleBtn +
             '<button class="copy-one" type="button" onclick="copyOne(' + i + ')">复制</button>' +
           '</div>' +
@@ -1108,6 +1211,42 @@ def generate_chat_html(
       }}).join('');
     }}
 
+    function resolveExportWorkspacePath() {{
+      var dirName = WORKSPACE_DIR_NAME || 'workspace';
+      var href = String(window.location.href || '');
+      if (!href) return './' + dirName;
+      if (href.indexOf('file://') === 0) {{
+        var pathname = decodeURIComponent(String(window.location.pathname || ''));
+        if (/^\/[A-Za-z]:\//.test(pathname)) pathname = pathname.slice(1);
+        var sep = String.fromCharCode(92);
+        pathname = pathname.replace(/\//g, sep);
+        var pos = pathname.lastIndexOf(sep);
+        var base = pos >= 0 ? pathname.slice(0, pos) : pathname;
+        return base ? (base + sep + dirName) : ('.' + sep + dirName);
+      }}
+      return './' + dirName;
+    }}
+
+    function renderWorkspacePath() {{
+      var valEl = document.getElementById('workspacePathValue');
+      if (!valEl) return;
+      valEl.textContent = resolveExportWorkspacePath();
+    }}
+
+    function copyWorkspacePath() {{
+      var val = resolveExportWorkspacePath();
+      if (!val) return;
+      copyText(val).then(function () {{
+        var btn = document.getElementById('btnCopyWorkspacePath');
+        if (!btn) return;
+        var prev = btn.textContent;
+        btn.textContent = '已复制';
+        setTimeout(function () {{ btn.textContent = prev; }}, 1500);
+      }});
+    }}
+
+
+
     function setView(view) {{
       currentView = view === 'full' ? 'full' : 'basic';
       document.getElementById('btnBasic').classList.toggle('active', currentView === 'basic');
@@ -1119,7 +1258,9 @@ def generate_chat_html(
 
     renderChats();
     renderMedia();
+    renderWorkspacePath();
   </script>
+
 </body>
 </html>"""
 
@@ -1156,6 +1297,8 @@ def build_export_html_zip(ids: list[str]) -> bytes:
             detail_entry = "index.html" if single_mode else f"{conv_root}/index.html"
             session_entry = "session.json" if single_mode else f"{conv_root}/session.json"
             media_root = "media" if single_mode else f"{conv_root}/media"
+            workspace_root = "workspace" if single_mode else f"{conv_root}/workspace"
+
 
             media_files: list[dict[str, Any]] = []
             used_names: set[str] = set()
@@ -1192,6 +1335,28 @@ def build_export_html_zip(ids: list[str]) -> bytes:
                     }
                 )
 
+            workspace_files: list[dict[str, Any]] = []
+            cwd = str(session.get("cwd", "") or "")
+            for wf in collect_workspace_files(cwd):
+                rel_path = str(wf.get("relativePath", "") or "")
+                local_path = str(wf.get("localPath", "") or "")
+                src_path = Path(local_path) if local_path else None
+                file_exists = bool(src_path is not None and src_path.exists() and src_path.is_file())
+                if src_path is not None and file_exists:
+                    try:
+                        zf.writestr(f"{workspace_root}/{rel_path}", src_path.read_bytes())
+                    except Exception:
+                        file_exists = False
+                workspace_files.append(
+                    {
+                        "name": str(wf.get("name", "") or ""),
+                        "relativePath": rel_path,
+                        "size": int(wf.get("size", 0) or 0),
+                        "localPath": local_path,
+                        "exportedPath": f"workspace/{rel_path}" if file_exists else "",
+                    }
+                )
+
             html_content = generate_chat_html(
                 title,
                 cid,
@@ -1201,6 +1366,7 @@ def build_export_html_zip(ids: list[str]) -> bytes:
                 show_back_link=not single_mode,
                 back_href="../../index.html",
             )
+
             zf.writestr(detail_entry, html_content)
             zf.writestr(
                 session_entry,
@@ -1211,6 +1377,8 @@ def build_export_html_zip(ids: list[str]) -> bytes:
                         "createdAt": created_at,
                         "messageCount": len(messages),
                         "mediaCount": len(media_files),
+                        "workspaceFileCount": len(workspace_files),
+
                     },
                     ensure_ascii=False,
                     indent=2,
@@ -1224,6 +1392,8 @@ def build_export_html_zip(ids: list[str]) -> bytes:
                     "entry": detail_entry,
                     "messageCount": len(messages),
                     "mediaCount": len(media_files),
+                    "workspaceFileCount": len(workspace_files),
+
                 }
             )
 

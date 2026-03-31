@@ -21,3 +21,9 @@ class DeleteResponse(BaseModel):
     filesDeleted: int = 0
     deletedFiles: list[str] = Field(default_factory=list)
 
+
+class ModelsConfigSaveRequest(BaseModel):
+    models: list[dict[str, Any]] = Field(default_factory=list)
+    config: dict[str, Any] | None = None
+
+

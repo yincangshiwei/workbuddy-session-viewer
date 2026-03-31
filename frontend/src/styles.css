@@ -5,6 +5,10 @@ body { background: #1a202c; color: #e2e8f0; font-family: -apple-system, BlinkMac
 .header { background: linear-gradient(135deg, #2d3748, #1a202c); padding: 20px 24px; border-bottom: 1px solid #2d3748; }
 .header h1 { font-size: 20px; color: #90cdf4; margin-bottom: 4px; }
 .header p { color: #718096; font-size: 12px; }
+.header-nav { margin-top: 12px; display: flex; gap: 8px; }
+.header-nav-btn { background: #2d3748; border: 1px solid #4a5568; color: #a0aec0; padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 12px; }
+.header-nav-btn.active { background: #2b6cb0; border-color: #2b6cb0; color: #fff; }
+
 
 .stats { display: flex; gap: 12px; padding: 16px 24px; background: #1a202c; border-bottom: 1px solid #2d3748; flex-wrap: wrap; }
 .stat { background: #2d3748; border-radius: 8px; padding: 10px 16px; min-width: 100px; text-align: center; }
@@ -25,9 +29,55 @@ body { background: #1a202c; color: #e2e8f0; font-family: -apple-system, BlinkMac
 .auto-refresh-tip { color: #63b3ed; font-size: 12px; margin-left: 2px; min-width: 150px; }
 .auto-refresh-tip.active { color: #f6ad55; }
 
+.config-page { padding: 16px 24px 70px; }
+.config-toolbar { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 12px; flex-wrap: wrap; }
+.config-title-wrap { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.config-title-wrap h2 { font-size: 18px; color: #e2e8f0; }
+.config-tag { font-size: 12px; color: #f6ad55; background: rgba(246, 173, 85, 0.15); border: 1px solid rgba(246, 173, 85, 0.35); border-radius: 999px; padding: 3px 10px; }
+.config-actions { display: flex; gap: 8px; }
+.config-actions button { background: #2b6cb0; border: none; color: #fff; padding: 6px 14px; border-radius: 6px; cursor: pointer; font-size: 12px; }
+.config-actions button:disabled { opacity: 0.55; cursor: not-allowed; }
+.notice { margin: 12px 0; background: #22543d; border: 1px solid #2f855a; color: #c6f6d5; padding: 8px 12px; border-radius: 6px; }
 
+.model-config-layout { display: grid; grid-template-columns: 320px 1fr; gap: 12px; min-height: calc(100vh - 260px); }
+.model-list-panel, .model-editor-panel { background: #1e2533; border: 1px solid #2d3748; border-radius: 10px; }
+.model-list-panel { display: flex; flex-direction: column; overflow: hidden; }
+.model-list-header { display: flex; justify-content: space-between; align-items: center; padding: 10px 12px; border-bottom: 1px solid #2d3748; color: #a0aec0; font-size: 12px; }
+.model-list { padding: 10px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; }
+.model-item { text-align: left; background: #2d3748; border: 1px solid #4a5568; border-radius: 8px; padding: 10px; color: #e2e8f0; cursor: pointer; }
+.model-item.active { border-color: #2b6cb0; background: #243b53; }
+.model-item-name { font-size: 13px; font-weight: 600; margin-bottom: 2px; }
+.model-item-meta { font-size: 11px; color: #a0aec0; }
+
+.model-editor-panel { padding: 14px; overflow-y: auto; }
+.form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.form-grid label { display: flex; flex-direction: column; gap: 6px; }
+.form-grid label span { font-size: 12px; color: #a0aec0; }
+.form-grid input { background: #2d3748; border: 1px solid #4a5568; color: #e2e8f0; padding: 8px 10px; border-radius: 6px; font-size: 13px; }
+.full-width { grid-column: 1 / -1; }
+.api-key-row { display: flex; gap: 8px; }
+.api-key-row input { flex: 1; }
+
+.advanced-box { margin-top: 14px; padding: 12px; border: 1px solid #2d3748; border-radius: 8px; background: #1a202c; }
+.advanced-title { color: #90cdf4; font-size: 12px; margin-bottom: 10px; }
+.switch-group { display: flex; gap: 18px; flex-wrap: wrap; margin-bottom: 12px; }
+.switch-group label { font-size: 13px; color: #e2e8f0; display: inline-flex; align-items: center; gap: 6px; }
+.token-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.token-grid label { display: flex; flex-direction: column; gap: 6px; }
+.token-grid span { font-size: 12px; color: #a0aec0; }
+.token-grid input { background: #2d3748; border: 1px solid #4a5568; color: #e2e8f0; padding: 8px 10px; border-radius: 6px; font-size: 13px; }
+
+.editor-footer { margin-top: 14px; display: flex; justify-content: space-between; gap: 8px; }
+.editor-footer button { background: #2b6cb0; border: none; color: #fff; padding: 7px 14px; border-radius: 6px; cursor: pointer; font-size: 12px; }
+.editor-footer button:disabled { opacity: 0.55; cursor: not-allowed; }
+
+@media (max-width: 900px) {
+  .model-config-layout { grid-template-columns: 1fr; }
+  .form-grid, .token-grid { grid-template-columns: 1fr; }
+}
 
 .batch-bar { display: none; padding: 10px 24px; background: #2c5282; border-bottom: 1px solid #2b6cb0; align-items: center; gap: 12px; }
+
 .batch-bar.visible { display: flex; }
 .batch-bar span { color: #bee3f8; font-size: 13px; }
 .batch-del-btn { background: #9b2c2c; border: none; color: #fed7d7; padding: 6px 16px; border-radius: 6px; cursor: pointer; font-size: 12px; font-weight: 600; }
@@ -101,9 +151,17 @@ tr.row-selected:hover td { background: #2c4a67; }
 .media-actions { display: flex; gap: 8px; align-items: center; flex-shrink: 0; flex-wrap: wrap; justify-content: flex-end; }
 .btn-outline:disabled { opacity: 0.55; cursor: not-allowed; }
 
+.workspace-tree { display: flex; flex-direction: column; gap: 8px; }
+.workspace-row { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 8px 10px; background: #2d3748; border: 1px solid #4a5568; border-radius: 6px; }
+.workspace-line { min-width: 0; flex: 1; display: flex; align-items: center; gap: 10px; font-size: 11px; }
+.workspace-name { color: #90cdf4; font-size: 12px; font-weight: 600; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.workspace-rel { color: #a0aec0; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.workspace-size { color: #718096; flex-shrink: 0; }
+
 
 
 .chat-item { border-radius: 8px; padding: 10px 12px; margin-bottom: 8px; border: 1px solid #2d3748; }
+
 .chat-item.role-user { background: #1f3346; border-color: #2b6cb0; }
 .chat-item.role-assistant { background: #2d3748; border-color: #4a5568; }
 .chat-item.role-tool { background: #2a223a; border-color: #553c9a; }
