@@ -141,8 +141,11 @@ def load_sessions() -> list[dict[str, Any]]:
                 "cwd": cwd,
                 "createdAtTs": s.get("createdAt", 0),
                 "updatedAtTs": s.get("updatedAt", 0),
+                "deletedAtTs": s.get("deletedAt", 0) or 0,
                 "createdAt": ts_to_text(s.get("createdAt", 0)),
                 "updatedAt": ts_to_text(s.get("updatedAt", 0)),
+                "deletedAt": ts_to_text(s.get("deletedAt", 0)),
+
                 "cwdExists": Path(cwd).exists() if cwd else False,
                 "todos": todos_map.get(cid, []),
                 "fileChanges": [
