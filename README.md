@@ -1,6 +1,7 @@
 # WorkBuddy 会话管理器（前后端分离版）
 
-基于 `FastAPI + React(Vite)` 的本地会话管理工具，用于查看和删除 WorkBuddy 本地历史会话。
+基于 `FastAPI + React(Vite)` 的本地会话管理工具，用于查看、导出、分享和删除 WorkBuddy 本地历史会话。
+
 
 ## 目录结构
 
@@ -62,12 +63,15 @@ python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 9877
 - `GET /api/sessions`：读取并聚合本地会话基础数据
 - `GET /api/session/{conversationId}/chat`：读取指定会话的完整聊天记录（用户/AI/工具消息）
 - `POST /api/export`：导出会话归档 ZIP
-- `POST /api/export-chat`：导出聊天 HTML + 媒体文件/工作目录文件 ZIP
+- `POST /api/export-chat`：导出聊天 HTML ZIP（支持 `multipart/form-data`：`ids`、`selectedMediaPaths`、`uploads`）
+- `POST /api/share-chat`：生成可外网访问的分享链接（支持媒体选择与上传）
+- `GET /shared/{shareId}/index.html`：访问分享页面（后端静态托管）
 - `GET /api/local/workspace-files`：读取指定 `cwd` 的工作目录文件数据
 - `GET /api/local/open-file`：打开本地文件（浏览器内联）
 - `POST /api/local/locate-file`：在系统文件管理器中定位文件
 - `POST /api/import`：导入会话归档 ZIP
 - `POST /api/delete`：删除会话及本地关联数据
+
 
 ## 前端（frontend）
 
@@ -96,6 +100,11 @@ frontend/
       Pagination.jsx             # 分页条
       SessionDetailModal.jsx     # 会话详情弹窗
       DeleteConfirmModal.jsx     # 删除确认弹窗
+      ProcessingModal.jsx        # 全屏处理中遮罩
+      ShareConfigModal.jsx       # 导出/分享配置弹窗（媒体选择/上传）
+      ShareResultModal.jsx       # 分享结果弹窗（复制/打开链接）
+      ModelConfigPanel.jsx       # 模型配置页面
+
 ```
 
 ### 架构约定（维护建议）
@@ -137,9 +146,20 @@ npm run build
 - `WORKBUDDY_HISTORY_BASE`
 - `WORKBUDDY_MEDIA_BASE`
 - `WORKBUDDY_TRANSCRIPTS_BASE`（完整对话 transcript 根目录，默认 `%LOCALAPPDATA%\WorkBuddyExtension\Data`）
+- `WORKBUDDY_SHARE_BASE`（分享页面落盘目录，默认 `%LOCALAPPDATA%\WorkBuddySessionViewer\shared`）
 
+分享功能相关环境变量：
+
+- `WORKBUDDY_SHARE_TTL_SECONDS`：分享目录过期清理时间（默认 `86400`，最小 `300`）
+- `WORKBUDDY_SHARE_PUBLIC_BASE_URL`：显式指定公网访问前缀（优先级最高）
+- `WORKBUDDY_SHARE_PORT`：创建公网隧道时使用的端口（默认从请求 URL 推断）
+- `NGROK_PATH`：本地 ngrok 可执行文件路径（避免运行时下载）
+- `NGROK_AUTHTOKEN`：ngrok 认证 token
+
+> 若服务已部署在公网地址，则会优先直接使用当前请求域名；若仅本地地址，则会尝试通过 ngrok 建立临时公网访问。
 
 ## 字段映射清单
+
 
 ### 任务列表与基础信息（`GET /api/sessions`）
 

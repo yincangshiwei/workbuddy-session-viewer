@@ -9,8 +9,10 @@ export default function SessionTable({
   sortBy,
   openDetail,
   exportOne,
+  shareOne,
   openDelete,
 }) {
+
   return (
     <div className="table-wrap">
       <table>
@@ -77,8 +79,10 @@ export default function SessionTable({
                 <td style={{ textAlign: "center", whiteSpace: "nowrap" }}>
                   <button className="btn-outline" onClick={(e) => { e.stopPropagation(); openDetail(s, "info"); }}>详情</button>
                   <button className="btn-outline" onClick={(e) => { e.stopPropagation(); exportOne(s.conversationId); }}>导出</button>
+                  <button className="btn-outline" onClick={(e) => { e.stopPropagation(); shareOne(s.conversationId); }}>分享</button>
                   <button className="btn-danger" onClick={(e) => { e.stopPropagation(); openDelete([s.conversationId]); }}>删除</button>
                 </td>
+
               </tr>
             );
           })}

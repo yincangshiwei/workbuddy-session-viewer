@@ -1,0 +1,15 @@
+{
+  "format": "workbuddy-chat-export-v3",
+  "exportedAt": 1775109902029,
+  "count": 1,
+  "sessions": [
+    {
+      "conversationId": "ba3f13e0886b46e0aa417a02729098e6",
+      "title": "帮我把 自留版的数据按照 这个模板excel进行填充，自留版",
+      "entry": "index.html",
+      "messageCount": 154,
+      "mediaCount": 10,
+      "workspaceFileCount": 27
+    }
+  ]
+}

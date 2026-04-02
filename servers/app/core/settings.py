@@ -35,5 +35,7 @@ TODOS_BASE = Path(os.getenv("WORKBUDDY_TODOS_BASE", STORAGE_BASE / "todos"))
 FC_BASE = Path(os.getenv("WORKBUDDY_FILE_CHANGES_BASE", STORAGE_BASE / "file-changes"))
 HISTORY_BASE = Path(os.getenv("WORKBUDDY_HISTORY_BASE", STORAGE_BASE / "genie-history"))
 MEDIA_BASE = Path(os.getenv("WORKBUDDY_MEDIA_BASE", STORAGE_BASE / "media-index"))
+SHARE_BASE = Path(os.getenv("WORKBUDDY_SHARE_BASE", LOCALAPPDATA / "WorkBuddySessionViewer" / "shared"))
 MODELS_JSON_PATH = Path(os.getenv("WORKBUDDY_MODELS_JSON", USERPROFILE / ".workbuddy" / "models.json"))
+
 

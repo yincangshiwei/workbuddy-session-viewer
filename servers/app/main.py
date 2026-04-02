@@ -8,6 +8,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from app.api.router import api_router
+from app.core.settings import SHARE_BASE
+
 
 app = FastAPI(title="WorkBuddy Session Viewer API")
 
@@ -22,6 +24,11 @@ app.add_middleware(
 
 app.include_router(api_router)
 
+shared_dir = SHARE_BASE.resolve()
+shared_dir.mkdir(parents=True, exist_ok=True)
+app.mount("/shared", StaticFiles(directory=str(shared_dir), html=True), name="shared")
+
 static_dir = (Path(__file__).resolve().parents[1] / "static").resolve()
 if static_dir.exists():
     app.mount("/", StaticFiles(directory=str(static_dir), html=True), name="frontend")
+

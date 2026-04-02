@@ -14,8 +14,10 @@ export default function SessionToolbar({
   refresh,
   loading,
   exportSelected,
+  shareSelected,
   selectedCount,
   openDeleteSelected,
+
   filteredCount,
   totalCount,
   autoRefreshing,
@@ -48,7 +50,9 @@ export default function SessionToolbar({
       <button onClick={clearFilters}>清除筛选</button>
       <button onClick={refresh} disabled={loading}>{loading ? "处理中..." : "刷新"}</button>
       <button onClick={exportSelected} disabled={loading || selectedCount === 0}>导出对话({selectedCount})</button>
+      <button onClick={shareSelected} disabled={loading || selectedCount === 0}>分享对话({selectedCount})</button>
       <button className="btn-danger" onClick={openDeleteSelected} disabled={loading || selectedCount === 0}>批量删除({selectedCount})</button>
+
       <span className="countDisplay">显示 {filteredCount} / {totalCount} 条</span>
       <span className={`auto-refresh-tip ${autoRefreshing ? "active" : ""}`}>{autoRefreshing ? "自动刷新中..." : `自动刷新倒计时：${countdown}s`}</span>
     </div>

@@ -571,7 +571,10 @@ def generate_chat_html(
     created_at: str,
     show_back_link: bool = True,
     back_href: str = "../../index.html",
+    show_workspace_panel: bool = True,
+    show_media_panel: bool | None = None,
 ) -> str:
+
 
     basic_messages = _build_basic_messages(messages)
 
@@ -600,8 +603,48 @@ def generate_chat_html(
         if show_back_link
         else ""
     )
+    has_media_panel = bool(media_files) if show_media_panel is None else bool(show_media_panel)
+    has_workspace_panel = bool(show_workspace_panel)
+    has_side_panel = has_media_panel or has_workspace_panel
+    content_grid_template = "minmax(0,1fr) 340px" if has_side_panel else "minmax(0,1fr)"
+
+    media_panel_html = ""
+    if has_media_panel:
+        media_panel_html = f'''
+        <div class="panel-header">
+          <h3 class="panel-title">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"></path></svg>
+            媒体文件
+          </h3>
+          <span style="color:var(--muted);font-size:13px;font-weight:600">{len(media_files)} 个</span>
+        </div>
+        <div id="mediaList" class="media-list"></div>
+        '''
+
+    workspace_panel_html = ""
+    if has_workspace_panel:
+        workspace_panel_html = '''
+        <div class="panel-header" style="margin-top:14px">
+          <h3 class="panel-title">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7h5l2 2h11v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"></path></svg>
+            工作目录
+          </h3>
+        </div>
+        <div class="workspace-path-card">
+          <div class="workspace-path-label">工作目录路径</div>
+          <div class="workspace-path-row">
+            <div id="workspacePathValue" class="workspace-path-value"></div>
+            <button id="btnCopyWorkspacePath" class="btn-action" type="button" onclick="copyWorkspacePath()">复制目录</button>
+          </div>
+        </div>
+        '''
+
+    side_panel_html = ""
+    if has_side_panel:
+        side_panel_html = f"""<aside class=\"media-panel\">{media_panel_html}{workspace_panel_html}</aside>"""
 
     return f"""<!doctype html>
+
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8" />
@@ -718,9 +761,10 @@ def generate_chat_html(
 
     .content {{
       display:grid;
-      grid-template-columns:minmax(0,1fr) 340px;
+      grid-template-columns:{content_grid_template};
       gap:20px; align-items:start;
     }}
+
 
     .chat-panel,
     .media-panel {{
@@ -970,30 +1014,8 @@ def generate_chat_html(
         </div>
         <div id="chatList" class="chat-list"></div>
       </div>
-      <aside class="media-panel">
-        <div class="panel-header">
-          <h3 class="panel-title">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"></path></svg>
-            媒体文件
-          </h3>
-          <span style="color:var(--muted);font-size:13px;font-weight:600">{len(media_files)} 个</span>
-        </div>
-        <div id="mediaList" class="media-list"></div>
+      {side_panel_html}
 
-        <div class="panel-header" style="margin-top:14px">
-          <h3 class="panel-title">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7h5l2 2h11v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"></path></svg>
-            工作目录
-          </h3>
-        </div>
-        <div class="workspace-path-card">
-          <div class="workspace-path-label">工作目录路径</div>
-          <div class="workspace-path-row">
-            <div id="workspacePathValue" class="workspace-path-value"></div>
-            <button id="btnCopyWorkspacePath" class="btn-action" type="button" onclick="copyWorkspacePath()">复制目录</button>
-          </div>
-        </div>
-      </aside>
 
     </section>
   </div>
@@ -1193,6 +1215,7 @@ def generate_chat_html(
 
     function renderMedia() {{
       var root = document.getElementById('mediaList');
+      if (!root) return;
       if (!MEDIA_FILES.length) {{
         root.innerHTML = '<div class="empty">未找到媒体文件</div>';
         return;
@@ -1200,16 +1223,15 @@ def generate_chat_html(
       root.innerHTML = MEDIA_FILES.map(function (m) {{
         var path = m && m.exportedPath ? m.exportedPath : '';
         var openLink = path ? '<a class="link" href="' + safe(path) + '" target="_blank">打开文件</a>' : '';
-        var dirPath = path ? path.substring(0, path.lastIndexOf('/') + 1) : '';
-        var locateLink = dirPath ? '<a class="link" href="' + safe(dirPath) + '" target="_blank">定位文件</a>' : '';
         return '<div class="media-item">' +
           '<div class="media-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><path d="M14 2v6h6"></path></svg></div>' +
           '<div class="media-name">' + safe((m && m.fileName) || '-') + '</div>' +
           '<div class="media-meta">' + safe((m && m.mimeType) || '-') + ' · ' + safe(formatBytes((m && m.size) || 0)) + '</div>' +
-          '<div class="media-links">' + openLink + locateLink + '</div>' +
+          '<div class="media-links">' + openLink + '</div>' +
         '</div>';
       }}).join('');
     }}
+
 
     function resolveExportWorkspacePath() {{
       var dirName = WORKSPACE_DIR_NAME || 'workspace';
@@ -1265,11 +1287,18 @@ def generate_chat_html(
 </html>"""
 
 
-def build_export_html_zip(ids: list[str]) -> bytes:
+def build_export_html_zip(
+    ids: list[str],
+    selected_media_paths: list[str] | None = None,
+    uploaded_media: list[dict[str, Any]] | None = None,
+) -> bytes:
     uniq_ids = [x for x in dict.fromkeys(ids) if x]
     session_map = load_session_values(uniq_ids)
     exportable_ids = [cid for cid in uniq_ids if session_map.get(cid)]
     single_mode = len(exportable_ids) == 1
+    selected_paths = {str(x) for x in (selected_media_paths or []) if str(x)}
+    extra_uploads = uploaded_media or []
+
 
     buf = io.BytesIO()
     exported_at_ms = int(time.time() * 1000)
@@ -1289,6 +1318,12 @@ def build_export_html_zip(ids: list[str]) -> bytes:
 
             messages = chat_data.get("messages", []) if isinstance(chat_data, dict) else []
             media_records = collect_media_records(cid)
+            if selected_paths:
+                media_records = [
+                    rec for rec in media_records if str(rec.get("filePath", "") or "") in selected_paths
+                ]
+            else:
+                media_records = []
 
             title = str(session.get("title", "") or "")
             created_at = ts_to_text(session.get("createdAt", 0))
@@ -1323,7 +1358,7 @@ def build_export_html_zip(ids: list[str]) -> bytes:
                     try:
                         zf.writestr(f"{media_root}/{candidate}", src_path.read_bytes())
                     except Exception:
-                        pass
+                        file_exists = False
 
                 media_files.append(
                     {
@@ -1334,6 +1369,40 @@ def build_export_html_zip(ids: list[str]) -> bytes:
                         "localPath": file_path,
                     }
                 )
+
+            for up in extra_uploads:
+                file_name = str(up.get("fileName", "upload.bin") or "upload.bin")
+                mime_type = str(up.get("mimeType", "") or "")
+                content = up.get("content", b"")
+                if not isinstance(content, (bytes, bytearray)) or not content:
+                    continue
+                size = int(up.get("size", len(content)) or len(content))
+
+                ext = Path(file_name).suffix
+                stem = Path(file_name).stem
+                candidate = file_name
+                idx = 1
+                while candidate.lower() in used_names:
+                    candidate = f"{stem}_{idx}{ext}"
+                    idx += 1
+                used_names.add(candidate.lower())
+
+                try:
+                    zf.writestr(f"{media_root}/{candidate}", bytes(content))
+                    exported_path = f"media/{candidate}"
+                except Exception:
+                    exported_path = ""
+
+                media_files.append(
+                    {
+                        "fileName": file_name,
+                        "mimeType": mime_type,
+                        "size": size,
+                        "exportedPath": exported_path,
+                        "localPath": "",
+                    }
+                )
+
 
             workspace_files: list[dict[str, Any]] = []
             cwd = str(session.get("cwd", "") or "")
@@ -1414,3 +1483,178 @@ def build_export_html_zip(ids: list[str]) -> bytes:
         )
 
     return buf.getvalue()
+
+
+def build_share_html_zip(
+    ids: list[str],
+    selected_media_paths: list[str] | None = None,
+    uploaded_media: list[dict[str, Any]] | None = None,
+) -> bytes:
+    uniq_ids = [x for x in dict.fromkeys(ids) if x]
+    session_map = load_session_values(uniq_ids)
+    exportable_ids = [cid for cid in uniq_ids if session_map.get(cid)]
+    single_mode = len(exportable_ids) == 1
+
+    selected_paths = {str(x) for x in (selected_media_paths or []) if str(x)}
+    extra_uploads = uploaded_media or []
+
+    buf = io.BytesIO()
+    exported_at_ms = int(time.time() * 1000)
+    exported_at_text = ts_to_text(exported_at_ms)
+    index_entries: list[dict[str, Any]] = []
+
+    with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        for cid in uniq_ids:
+            session = session_map.get(cid)
+            if not session:
+                continue
+
+            try:
+                chat_data = load_conversation_chat(cid)
+            except Exception:
+                chat_data = {"messages": []}
+
+            messages = chat_data.get("messages", []) if isinstance(chat_data, dict) else []
+            media_records = collect_media_records(cid)
+            if selected_paths:
+                media_records = [
+                    rec for rec in media_records if str(rec.get("filePath", "") or "") in selected_paths
+                ]
+            else:
+                media_records = []
+
+            title = str(session.get("title", "") or "")
+            created_at = ts_to_text(session.get("createdAt", 0))
+            folder_name = f"{cid}-{_slugify(title, cid)[:32]}"
+            conv_root = "" if single_mode else f"conversations/{folder_name}"
+            detail_entry = "index.html" if single_mode else f"{conv_root}/index.html"
+            session_entry = "session.json" if single_mode else f"{conv_root}/session.json"
+            media_root = "media" if single_mode else f"{conv_root}/media"
+
+            media_files: list[dict[str, Any]] = []
+            used_names: set[str] = set()
+
+            for rec in media_records:
+                file_path = str(rec.get("filePath", "") or "")
+                file_name = str(rec.get("fileName", "") or "")
+                if not file_name:
+                    file_name = Path(file_path).name if file_path else "unknown.bin"
+
+                ext = Path(file_name).suffix
+                stem = Path(file_name).stem
+                candidate = file_name
+                idx = 1
+                while candidate.lower() in used_names:
+                    candidate = f"{stem}_{idx}{ext}"
+                    idx += 1
+                used_names.add(candidate.lower())
+
+                src_path = Path(file_path) if file_path else None
+                file_exists = bool(src_path is not None and src_path.exists() and src_path.is_file())
+                if src_path is not None and file_exists:
+                    try:
+                        zf.writestr(f"{media_root}/{candidate}", src_path.read_bytes())
+                    except Exception:
+                        file_exists = False
+
+                media_files.append(
+                    {
+                        "fileName": file_name,
+                        "mimeType": str(rec.get("mimeType", "") or ""),
+                        "size": int(rec.get("size", 0) or 0),
+                        "exportedPath": f"media/{candidate}" if file_exists else "",
+                        "localPath": file_path,
+                    }
+                )
+
+            for up in extra_uploads:
+                file_name = str(up.get("fileName", "upload.bin") or "upload.bin")
+                mime_type = str(up.get("mimeType", "") or "")
+                content = up.get("content", b"")
+                if not isinstance(content, (bytes, bytearray)) or not content:
+                    continue
+                size = int(up.get("size", len(content)) or len(content))
+
+                ext = Path(file_name).suffix
+                stem = Path(file_name).stem
+                candidate = file_name
+                idx = 1
+                while candidate.lower() in used_names:
+                    candidate = f"{stem}_{idx}{ext}"
+                    idx += 1
+                used_names.add(candidate.lower())
+
+                try:
+                    zf.writestr(f"{media_root}/{candidate}", bytes(content))
+                    exported_path = f"media/{candidate}"
+                except Exception:
+                    exported_path = ""
+
+                media_files.append(
+                    {
+                        "fileName": file_name,
+                        "mimeType": mime_type,
+                        "size": size,
+                        "exportedPath": exported_path,
+                        "localPath": "",
+                    }
+                )
+
+            html_content = generate_chat_html(
+                title,
+                cid,
+                messages,
+                media_files,
+                created_at,
+                show_back_link=not single_mode,
+                back_href="../../index.html",
+                show_workspace_panel=False,
+                show_media_panel=bool(media_files),
+            )
+
+            zf.writestr(detail_entry, html_content)
+            zf.writestr(
+                session_entry,
+                json.dumps(
+                    {
+                        "conversationId": cid,
+                        "title": title,
+                        "createdAt": created_at,
+                        "messageCount": len(messages),
+                        "mediaCount": len(media_files),
+                        "workspaceFileCount": 0,
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                ),
+            )
+
+            index_entries.append(
+                {
+                    "conversationId": cid,
+                    "title": title,
+                    "entry": detail_entry,
+                    "messageCount": len(messages),
+                    "mediaCount": len(media_files),
+                    "workspaceFileCount": 0,
+                }
+            )
+
+        if not single_mode:
+            zf.writestr("index.html", generate_export_index_html(index_entries, exported_at_text))
+        zf.writestr(
+            "manifest.json",
+            json.dumps(
+                {
+                    "format": "workbuddy-chat-share-v1",
+                    "exportedAt": exported_at_ms,
+                    "count": len(index_entries),
+                    "sessions": index_entries,
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+        )
+
+    return buf.getvalue()
+

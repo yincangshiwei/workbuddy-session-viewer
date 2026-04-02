@@ -8,7 +8,12 @@ import SessionStats from "./components/SessionStats";
 import SessionTable from "./components/SessionTable";
 import SessionToolbar from "./components/SessionToolbar";
 import ModelConfigPanel from "./components/ModelConfigPanel";
+import ProcessingModal from "./components/ProcessingModal";
+import ShareResultModal from "./components/ShareResultModal";
+import ShareConfigModal from "./components/ShareConfigModal";
 import { PAGE_SIZE } from "./constants/session";
+
+
 
 import { copyToClipboard, extractUserQuery } from "./utils/session";
 
@@ -18,6 +23,14 @@ export default function App() {
   const [autoRefreshing, setAutoRefreshing] = useState(false);
   const [countdown, setCountdown] = useState(5);
   const [error, setError] = useState("");
+  const [shareResult, setShareResult] = useState(null);
+  const [shareConfig, setShareConfig] = useState(null);
+  const [exportConfig, setExportConfig] = useState(null);
+  const [processingText, setProcessingText] = useState("");
+
+
+
+
 
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
@@ -306,19 +319,26 @@ export default function App() {
     }
   }
 
-  async function exportSessions(ids) {
+  async function exportSessions({ ids, selectedMediaPaths = [], uploadFiles = [] }) {
     if (!ids.length) {
       setError("请先勾选要导出的会话");
       return;
     }
 
-    setLoading(true);
+    setProcessingText("导出处理中...");
     setError("");
+
     try {
+      const formData = new FormData();
+      formData.append("ids", JSON.stringify(ids));
+      formData.append("selectedMediaPaths", JSON.stringify(selectedMediaPaths));
+      (uploadFiles || []).forEach((file) => {
+        formData.append("uploads", file);
+      });
+
       const resp = await fetch("/api/export-chat", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ids }),
+        body: formData,
       });
       if (!resp.ok) {
         const data = await resp.json().catch(() => ({}));
@@ -337,20 +357,85 @@ export default function App() {
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
+      setExportConfig(null);
     } catch (e) {
       setError(e.message || "导出失败");
     } finally {
-      setLoading(false);
+      setProcessingText("");
     }
   }
 
-  async function exportSelected() {
-    await exportSessions(Array.from(selectedIds));
+
+  async function shareSessions({ ids, selectedMediaPaths = [], uploadFiles = [] }) {
+
+    if (!ids.length) {
+      setError("请先勾选要分享的会话");
+      return;
+    }
+
+    setProcessingText("分享处理中...");
+    setError("");
+    setShareResult(null);
+
+    try {
+      const formData = new FormData();
+      formData.append("ids", JSON.stringify(ids));
+      formData.append("selectedMediaPaths", JSON.stringify(selectedMediaPaths));
+      (uploadFiles || []).forEach((file) => {
+        formData.append("uploads", file);
+      });
+
+      const resp = await fetch("/api/share-chat", {
+        method: "POST",
+        body: formData,
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok) throw new Error(data?.detail || `分享失败: ${resp.status}`);
+
+      setShareResult(data);
+      setShareConfig(null);
+    } catch (e) {
+      setError(e.message || "分享失败");
+    } finally {
+      setProcessingText("");
+    }
   }
 
-  async function exportOne(conversationId) {
-    await exportSessions([conversationId]);
+
+  function openExportConfig(ids) {
+    if (!ids.length) {
+      setError("请先勾选要导出的会话");
+      return;
+    }
+    setExportConfig({ ids });
   }
+
+  function exportSelected() {
+    openExportConfig(Array.from(selectedIds));
+  }
+
+  function exportOne(conversationId) {
+    openExportConfig([conversationId]);
+  }
+
+  function openShareConfig(ids) {
+
+    if (!ids.length) {
+      setError("请先勾选要分享的会话");
+      return;
+    }
+    setShareConfig({ ids });
+  }
+
+  function shareSelected() {
+    openShareConfig(Array.from(selectedIds));
+  }
+
+  function shareOne(conversationId) {
+    openShareConfig([conversationId]);
+  }
+
+
 
   const pendingManifest = useMemo(() => {
     const map = new Map(sessions.map((x) => [x.conversationId, x]));
@@ -363,6 +448,8 @@ export default function App() {
   }, [pendingDeleteIds, sessions]);
 
   const allCheckedOnPage = pageRows.length > 0 && pageRows.every((x) => selectedIds.has(x.conversationId));
+  const actionLoading = Boolean(processingText);
+
   const currentChat = detail ? chatMap[detail.conversationId] : null;
   const currentChatMessages = currentChat?.messages || [];
   const currentWorkspace = detail?.cwd ? workspaceMap[detail.cwd] : null;
@@ -408,9 +495,13 @@ export default function App() {
             clearFilters={clearFilters}
             refresh={() => { setCountdown(5); fetchSessions({ resetPage: true }); }}
             loading={loading}
+
+
             exportSelected={exportSelected}
+            shareSelected={shareSelected}
             selectedCount={selectedIds.size}
             openDeleteSelected={() => openDelete(Array.from(selectedIds))}
+
             filteredCount={filteredRows.length}
             totalCount={sessions.length}
             autoRefreshing={autoRefreshing}
@@ -420,6 +511,8 @@ export default function App() {
           {error ? <div className="error">{error}</div> : null}
 
           <SessionTable
+
+
             pageRows={pageRows}
             selectedIds={selectedIds}
             allCheckedOnPage={allCheckedOnPage}
@@ -428,7 +521,9 @@ export default function App() {
             sortBy={sortBy}
             openDetail={openDetail}
             exportOne={exportOne}
+            shareOne={shareOne}
             openDelete={openDelete}
+
           />
 
           <Pagination currentPage={currentPage} totalPages={totalPages} setCurrentPage={setCurrentPage} />
@@ -462,10 +557,36 @@ export default function App() {
             executeDelete={executeDelete}
             loading={loading}
           />
+
+          <ShareResultModal
+            result={shareResult}
+            closeShareResult={() => setShareResult(null)}
+            copyShareLink={(url) => copyToClipboard(url)}
+          />
+          <ShareConfigModal
+            config={exportConfig}
+            sessions={sessions}
+            closeModal={() => setExportConfig(null)}
+            submitShare={exportSessions}
+            title="导出配置"
+            description="本次将导出 {count} 条会话。可选择已有媒体，也可上传额外媒体。"
+
+            submitText="开始导出"
+          />
+          <ShareConfigModal
+            config={shareConfig}
+            sessions={sessions}
+            closeModal={() => setShareConfig(null)}
+            submitShare={shareSessions}
+          />
+
         </>
       )}
+      <ProcessingModal visible={actionLoading} text={processingText} />
+
     </>
   );
 }
+
 
 
