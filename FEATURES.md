@@ -89,6 +89,8 @@
 
 ![分享配置.png](./docs/images/%E5%88%86%E4%BA%AB%E9%85%8D%E7%BD%AE.png)
 
+![分享配置：分享链接.png](./docs/images/%E5%88%86%E4%BA%AB%E9%85%8D%E7%BD%AE%EF%BC%9A%E5%88%86%E4%BA%AB%E9%93%BE%E6%8E%A5.png)
+
 分享操作：本地是使用ngrok穿透技术，所以首访问需要点击“Visit Site”
 
 ![Ngrok：Visit Site.png](./docs/images/Ngrok%EF%BC%9AVisit%20Site.png)
