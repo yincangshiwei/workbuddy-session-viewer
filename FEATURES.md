@@ -8,6 +8,8 @@
 
 - [1. 主页](#1-主页)
 - [2. 会话详情](#2-会话详情)
+- [3. 导出](#3-导出)
+- [4. 分享](#4-分享)
 
 ---
 
@@ -27,10 +29,76 @@
 
 **功能说明：**
 
-<!-- 在此填写功能描述 -->
+提供了基本信息、对话（聊天记录）、Todos、文件变更、关联对话、媒体文件、工作目录文件等内容查看
 
 **截图：**
 
-<!-- ![会话详情](./docs/images/xxx.png) -->
+![会话详情：基本信息.png](./docs/images/%E4%BC%9A%E8%AF%9D%E8%AF%A6%E6%83%85%EF%BC%9A%E5%9F%BA%E6%9C%AC%E4%BF%A1%E6%81%AF.png)
+
+基础对话：只展示基础对话，不展示工具调用详情
+
+![会话详情-对话：基础对话.png](./docs/images/%E4%BC%9A%E8%AF%9D%E8%AF%A6%E6%83%85-%E5%AF%B9%E8%AF%9D%EF%BC%9A%E5%9F%BA%E7%A1%80%E5%AF%B9%E8%AF%9D.png)
+
+完整对话：提供了完整对话参数和工具调用详情
+
+![会话详情-对话：完整对话.png](./docs/images/%E4%BC%9A%E8%AF%9D%E8%AF%A6%E6%83%85-%E5%AF%B9%E8%AF%9D%EF%BC%9A%E5%AE%8C%E6%95%B4%E5%AF%B9%E8%AF%9D.png)
+
+![会话详情：Todos.png](./docs/images/%E4%BC%9A%E8%AF%9D%E8%AF%A6%E6%83%85%EF%BC%9ATodos.png)
+
+媒体文件：workbuddy的产物结果，支持直接打开和定位文件功能
+
+![会话详情：媒体文件.png](./docs/images/%E4%BC%9A%E8%AF%9D%E8%AF%A6%E6%83%85%EF%BC%9A%E5%AA%92%E4%BD%93%E6%96%87%E4%BB%B6.png)
+
+工作目录文件：workbuddy的工作目录，过程处理文件，支持直接打开和定位文件功能
+
+![会话详情：工作目录文件.png](./docs/images/%E4%BC%9A%E8%AF%9D%E8%AF%A6%E6%83%85%EF%BC%9A%E5%B7%A5%E4%BD%9C%E7%9B%AE%E5%BD%95%E6%96%87%E4%BB%B6.png)
+
+---
+
+## 3. 导出
+
+**功能说明：**
+
+支持批量会话导出和单会话导出，支持导出选择媒体文件和自上传媒体文件，导出后为压缩包文件，需要解压，加压后用浏览器打开目录里的index.html即可。
+
+**截图：**
+
+导出配置：
+
+![导出配置.png](./docs/images/%E5%AF%BC%E5%87%BA%E9%85%8D%E7%BD%AE.png)
+
+批量导出多会话界面：
+
+![多会话导出：界面.png](./docs/images/%E5%A4%9A%E4%BC%9A%E8%AF%9D%E5%AF%BC%E5%87%BA%EF%BC%9A%E7%95%8C%E9%9D%A2.png)
+
+单会话导出界面：
+
+![单会话导出：界面.png](./docs/images/%E5%8D%95%E4%BC%9A%E8%AF%9D%E5%AF%BC%E5%87%BA%EF%BC%9A%E7%95%8C%E9%9D%A2.png)
+
+---
+
+## 4. 分享
+
+**功能说明：**
+
+支持多会话和单会话分享，界面与导出一致，分享支持选择和自行上传分享媒体文件。
+
+**截图：**
+
+分享配置：
+
+![分享配置.png](./docs/images/%E5%88%86%E4%BA%AB%E9%85%8D%E7%BD%AE.png)
+
+分享操作：本地是使用ngrok穿透技术，所以首访问需要点击“Visit Site”
+
+![Ngrok：Visit Site.png](./docs/images/Ngrok%EF%BC%9AVisit%20Site.png)
+
+批量分享多会话界面：
+
+![多会话分享：界面.png](./docs/images/%E5%A4%9A%E4%BC%9A%E8%AF%9D%E5%88%86%E4%BA%AB%EF%BC%9A%E7%95%8C%E9%9D%A2.png)
+
+单会话分享界面：
+
+![单会话分享：界面.png](./docs/images/%E5%8D%95%E4%BC%9A%E8%AF%9D%E5%88%86%E4%BA%AB%EF%BC%9A%E7%95%8C%E9%9D%A2.png)
 
 ---
