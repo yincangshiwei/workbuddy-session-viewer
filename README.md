@@ -2,6 +2,7 @@
 
 基于 `FastAPI + React(Vite)` 的本地会话管理工具，用于查看、导出、分享和删除 WorkBuddy 本地历史会话。
 
+> 界面功能图文说明请查看 **[FEATURES.md](./FEATURES.md)**
 
 ## 目录结构
 
