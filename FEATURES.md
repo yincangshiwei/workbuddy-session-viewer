@@ -19,7 +19,7 @@
 
 **截图：**
 
-<!-- ![主页](./docs/images/workbuddy后台主页) -->
+<!-- ![主页](./docs/images/workbuddy后台主页.png) -->
 
 ---
 
@@ -31,6 +31,6 @@
 
 **截图：**
 
-<!-- ![主页](./docs/images/workbuddy后台主页) -->
+<!-- ![主页](./docs/images/workbuddy后台主页.png) -->
 
 ---
