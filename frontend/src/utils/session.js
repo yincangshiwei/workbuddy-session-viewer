@@ -21,8 +21,9 @@ export function prettyJson(value) {
 }
 
 export function extractUserQuery(text = "") {
-  const m = String(text).match(/<user_query>\s*([\s\S]*?)\s*<\/user_query>/i);
-  return m?.[1]?.trim() || "";
+  const all = [...String(text).matchAll(/<user_query>\s*([\s\S]*?)\s*<\/user_query>/gi)];
+  if (!all.length) return "";
+  return all[all.length - 1][1].trim();
 }
 
 export function copyToClipboard(text) {

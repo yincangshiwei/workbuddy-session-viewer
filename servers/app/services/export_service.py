@@ -163,8 +163,8 @@ def build_export_zip(ids: list[str]) -> bytes:
 def _extract_user_query(text: str) -> str:
     if not text:
         return ""
-    m = re.search(r"<user_query>\s*([\s\S]*?)\s*</user_query>", text, flags=re.IGNORECASE)
-    return (m.group(1).strip() if m else "")
+    matches = re.findall(r"<user_query>\s*([\s\S]*?)\s*</user_query>", text, flags=re.IGNORECASE)
+    return matches[-1].strip() if matches else ""
 
 
 def _normalize_message_text(text: str) -> str:
