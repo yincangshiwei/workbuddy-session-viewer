@@ -153,10 +153,24 @@ npm run build
 - `WORKBUDDY_SHARE_TTL_SECONDS`：分享目录过期清理时间（默认 `86400`，最小 `300`）
 - `WORKBUDDY_SHARE_PUBLIC_BASE_URL`：显式指定公网访问前缀（优先级最高）
 - `WORKBUDDY_SHARE_PORT`：创建公网隧道时使用的端口（默认从请求 URL 推断）
-- `NGROK_PATH`：本地 ngrok 可执行文件路径（避免运行时下载）
+- `NGROK_PATH`：本地 ngrok 可执行文件路径（显式指定，优先级最高）
 - `NGROK_AUTHTOKEN`：ngrok 认证 token
 
 > 若服务已部署在公网地址，则会优先直接使用当前请求域名；若仅本地地址，则会尝试通过 ngrok 建立临时公网访问。
+
+### ngrok 内置二进制（离线可用）
+
+项目已在 `servers/bin/ngrok.exe`（Windows）预置了 ngrok 可执行文件，**无需外网下载**。
+
+ngrok 路径解析优先级：
+1. 环境变量 `NGROK_PATH`（用户显式指定）
+2. 项目内置 `servers/bin/ngrok.exe`（Windows）/ `servers/bin/ngrok`（Linux/macOS）
+3. pyngrok 默认行为（首次使用时从官网下载，需要外网）
+
+若在 Linux/macOS 环境部署，可手动将对应平台的 ngrok 二进制放到 `servers/bin/ngrok` 并赋予执行权限：
+```bash
+chmod +x servers/bin/ngrok
+```
 
 ## 字段映射清单
 

@@ -5,9 +5,11 @@ import ipaddress
 import os
 import secrets
 import shutil
+import sys
 import threading
 import time
 import zipfile
+from pathlib import Path
 from urllib.parse import urlparse
 
 from app.core.settings import SHARE_BASE
@@ -19,6 +21,32 @@ try:
 except Exception:  # pragma: no cover
     conf = None
     ngrok = None
+
+# 项目内置的 ngrok 二进制（Windows: servers/bin/ngrok.exe，其他平台同理）
+_BUNDLED_NGROK_DIR = Path(__file__).resolve().parent.parent.parent / "bin"
+_BUNDLED_NGROK_WIN = _BUNDLED_NGROK_DIR / "ngrok.exe"
+_BUNDLED_NGROK_UNIX = _BUNDLED_NGROK_DIR / "ngrok"
+
+
+def _resolve_ngrok_path() -> str | None:
+    """
+    优先级：
+    1. 环境变量 NGROK_PATH（用户显式指定）
+    2. 项目内置 servers/bin/ngrok.exe（Windows）或 servers/bin/ngrok（Unix）
+    3. 返回 None → 交给 pyngrok 默认行为（可能触发网络下载）
+    """
+    env_path = os.getenv("NGROK_PATH", "").strip()
+    if env_path and Path(env_path).is_file():
+        return env_path
+
+    if sys.platform == "win32":
+        if _BUNDLED_NGROK_WIN.is_file():
+            return str(_BUNDLED_NGROK_WIN)
+    else:
+        if _BUNDLED_NGROK_UNIX.is_file():
+            return str(_BUNDLED_NGROK_UNIX)
+
+    return None
 
 
 _SHARED_DIR = SHARE_BASE
@@ -82,7 +110,7 @@ def _ensure_public_base_url(port: int) -> str:
         if token:
             ngrok.set_auth_token(token)
 
-        ngrok_path = os.getenv("NGROK_PATH", "").strip()
+        ngrok_path = _resolve_ngrok_path()
         pyngrok_config = None
         if conf is not None and ngrok_path:
             pyngrok_config = conf.PyngrokConfig(ngrok_path=ngrok_path)
