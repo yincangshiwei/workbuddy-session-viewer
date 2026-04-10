@@ -1,6 +1,6 @@
 # WorkBuddy 会话管理器（前后端分离版）
 
-基于 `FastAPI + React(Vite)` 的本地会话管理工具，用于查看、导出、分享和删除 WorkBuddy 本地历史会话。
+基于 `FastAPI + React(Vite)` 的本地会话管理工具，用于查看、导出、分享、删除和恢复 WorkBuddy 本地历史会话，并提供工作空间管理功能。
 
 > 界面功能图文说明请查看 **[FEATURES.md](./FEATURES.md)**
 
@@ -22,7 +22,10 @@ servers/
         sessions.py         # 会话列表
         chat.py             # 会话聊天记录
         transfer.py         # 导入/导出
-        delete.py           # 删除会话
+        delete.py           # 删除会话（彻底删除 DB 记录与本地文件）
+        restore.py          # 恢复逻辑删除会话
+        title.py            # 修改会话标题
+        workspaces.py       # 工作空间列表与删除
     services/
       common.py             # 通用工具（时间/JSON/transcript索引等）
       session_service.py    # sessions 业务聚合
@@ -61,7 +64,7 @@ python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 9877
 后端接口：
 
 - `GET /api/health`
-- `GET /api/sessions`：读取并聚合本地会话基础数据
+- `GET /api/sessions`：读取并聚合本地会话基础数据（含逻辑删除字段 `deletedAt`）
 - `GET /api/session/{conversationId}/chat`：读取指定会话的完整聊天记录（用户/AI/工具消息）
 - `POST /api/export`：导出会话归档 ZIP
 - `POST /api/export-chat`：导出聊天 HTML ZIP（支持 `multipart/form-data`：`ids`、`selectedMediaPaths`、`uploads`）
@@ -71,7 +74,11 @@ python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 9877
 - `GET /api/local/open-file`：打开本地文件（浏览器内联）
 - `POST /api/local/locate-file`：在系统文件管理器中定位文件
 - `POST /api/import`：导入会话归档 ZIP
-- `POST /api/delete`：删除会话及本地关联数据
+- `POST /api/delete`：彻底删除会话及本地关联数据（从 DB 中物理删除记录）
+- `POST /api/restore`：恢复逻辑删除的会话（从 DB JSON 中移除 `deletedAt` 字段，使客户端重新识别）
+- `PUT /api/session/{conversationId}/title`：修改指定会话的标题
+- `GET /api/workspaces`：按工作目录聚合所有会话，返回工作空间列表
+- `DELETE /api/workspace`：删除工作目录（仅允许 DB 中该 cwd 下无任何会话记录时操作）
 
 
 ## 前端（frontend）
@@ -94,17 +101,18 @@ frontend/
     utils/
       session.js                 # 会话页面工具函数（复制/格式化/文本提取）
     components/
-      SessionHeader.jsx          # 顶部标题区
-      SessionStats.jsx           # 统计卡片区
+      SessionHeader.jsx          # 顶部标题区（含自动刷新倒计时）
+      SessionStats.jsx           # 统计卡片区（含逻辑删除数量）
       SessionToolbar.jsx         # 筛选与操作栏
       SessionTable.jsx           # 会话表格
-      Pagination.jsx             # 分页条
-      SessionDetailModal.jsx     # 会话详情弹窗
+      Pagination.jsx             # 分页条（含显示条数）
+      SessionDetailModal.jsx     # 会话详情弹窗（含标题编辑、逻辑删除恢复）
       DeleteConfirmModal.jsx     # 删除确认弹窗
       ProcessingModal.jsx        # 全屏处理中遮罩
       ShareConfigModal.jsx       # 导出/分享配置弹窗（媒体选择/上传）
       ShareResultModal.jsx       # 分享结果弹窗（复制/打开链接）
       ModelConfigPanel.jsx       # 模型配置页面
+      WorkspacePanel.jsx         # 工作空间页面（工作目录聚合管理）
 
 ```
 
@@ -185,6 +193,7 @@ chmod +x servers/bin/ngrok
 | 状态 | `status` | 同上，`ItemTable.value` JSON |
 | 工作目录 | `cwd` / `cwdExists` | 同上，`cwdExists` 为本地路径存在性检查 |
 | 创建/更新时间 | `createdAtTs`/`updatedAtTs` + `createdAt`/`updatedAt` | 同上，时间戳转文本 |
+| 逻辑删除时间 | `deletedAtTs` / `deletedAt` | 同上，客户端删除后写入的 `deletedAt` 时间戳；正常会话无此字段 |
 | Todos | `todos` | `%APPDATA%\WorkBuddy\User\globalStorage\tencent-cloud.coding-copilot\todos\{conversationId}.json` |
 | 文件变更 | `fileChanges[*]` | `%APPDATA%\WorkBuddy\User\globalStorage\tencent-cloud.coding-copilot\file-changes\{conversationId}\*.json` |
 | 媒体文件 | `mediaFiles[*]` | `%APPDATA%\WorkBuddy\User\globalStorage\tencent-cloud.coding-copilot\media-index\*.json` |
@@ -219,6 +228,31 @@ chmod +x servers/bin/ngrok
 | 工作目录目录数量（详情） | `dirCount` | 后端递归扫描 `cwd` 下全部子目录计数 |
 | 工作目录文件列表 | `tree.children`（前端扁平化后展示） | 本地文件系统目录树（按名称排序） |
 | 文件名/相对路径/大小 | `tree.children[*].name` / `relativePath` / `size` | 本地文件系统文件元数据 |
+
+### 工作空间列表（`GET /api/workspaces`）
+
+| 返回字段 | 含义 |
+|---|---|
+| `cwd` | 工作目录绝对路径 |
+| `cwdExists` | 本地目录是否存在 |
+| `totalSessions` | 该工作目录下的会话总数（含逻辑删除） |
+| `activeSessions` | 正常会话数（无 `deletedAt` 字段） |
+| `deletedSessions` | 逻辑删除会话数（有 `deletedAt` 字段） |
+| `canDelete` | 是否可删除目录（DB 中该 cwd 下无任何记录时为 `true`） |
+| `sessions[*]` | 该工作目录下的会话列表（含 `isDeleted` 标记） |
+
+## 逻辑删除说明
+
+WorkBuddy 客户端删除任务时，不会物理删除数据库记录，而是在会话 JSON 中写入 `deletedAt` 时间戳字段，客户端据此将该会话从列表中隐藏。
+
+本后台管理的处理逻辑：
+
+| 操作 | 行为 |
+|---|---|
+| **恢复**（`POST /api/restore`） | 从 DB JSON 中彻底移除 `deletedAt` 字段（而非置 0），使会话结构与正常会话完全一致，客户端重启后即可重新显示 |
+| **彻底删除**（`POST /api/delete`） | 从 DB 中物理删除记录，并清理本地 todos、file-changes、history 等关联文件 |
+
+> **注意**：恢复操作需要重启 WorkBuddy 客户端后生效。
 
 ## 一键启动（推荐）
 
