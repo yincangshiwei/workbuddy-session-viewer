@@ -11,6 +11,7 @@ export default function SessionTable({
   exportOne,
   shareOne,
   openDelete,
+  onRestore,
 }) {
 
   return (
@@ -80,6 +81,9 @@ export default function SessionTable({
                   <button className="btn-outline" onClick={(e) => { e.stopPropagation(); openDetail(s, "info"); }}>详情</button>
                   <button className="btn-outline" onClick={(e) => { e.stopPropagation(); exportOne(s.conversationId); }}>导出</button>
                   <button className="btn-outline" onClick={(e) => { e.stopPropagation(); shareOne(s.conversationId); }}>分享</button>
+                  {s.deletedAt ? (
+                    <button className="btn-restore" onClick={(e) => { e.stopPropagation(); onRestore && onRestore([s.conversationId]); }}>恢复</button>
+                  ) : null}
                   <button className="btn-danger" onClick={(e) => { e.stopPropagation(); openDelete([s.conversationId]); }}>删除</button>
                 </td>
 

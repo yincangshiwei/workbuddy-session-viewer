@@ -3,7 +3,10 @@ body { background: #1a202c; color: #e2e8f0; font-family: -apple-system, BlinkMac
 
 
 .header { background: linear-gradient(135deg, #2d3748, #1a202c); padding: 20px 24px; border-bottom: 1px solid #2d3748; }
-.header h1 { font-size: 20px; color: #90cdf4; margin-bottom: 4px; }
+.header-title-row { display: flex; align-items: center; gap: 10px; margin-bottom: 4px; }
+.header h1 { font-size: 20px; color: #90cdf4; }
+.header-countdown { font-size: 13px; font-weight: 700; color: #718096; font-variant-numeric: tabular-nums; min-width: 28px; background: #2d3748; border: 1px solid #4a5568; border-radius: 5px; padding: 2px 7px; letter-spacing: 0.5px; }
+.header-countdown.active { color: #f6ad55; border-color: #744210; background: #2d2010; }
 .header p { color: #718096; font-size: 12px; }
 .header-nav { margin-top: 12px; display: flex; gap: 8px; }
 .header-nav-btn { background: #2d3748; border: 1px solid #4a5568; color: #a0aec0; padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 12px; }
@@ -26,8 +29,6 @@ body { background: #1a202c; color: #e2e8f0; font-family: -apple-system, BlinkMac
 .toolbar button { background: #2b6cb0; border: none; color: #fff; padding: 6px 14px; border-radius: 6px; cursor: pointer; font-size: 12px; }
 .toolbar .date-group { display: flex; gap: 6px; align-items: center; font-size: 12px; color: #718096; }
 .countDisplay { color: #718096; font-size: 12px; }
-.auto-refresh-tip { color: #63b3ed; font-size: 12px; margin-left: 2px; min-width: 150px; }
-.auto-refresh-tip.active { color: #f6ad55; }
 
 .config-page { padding: 16px 24px 70px; }
 .config-toolbar { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 12px; flex-wrap: wrap; }
@@ -104,12 +105,22 @@ tr.row-selected:hover td { background: #2c4a67; }
 .btn-outline { background: #2d3748; border: 1px solid #4a5568; color: #e2e8f0; padding: 4px 8px; border-radius: 4px; cursor: pointer; font-size: 11px; margin-right: 4px; text-decoration: none; display: inline-flex; align-items: center; justify-content: center; }
 
 .btn-danger { background: #742a2a; border: 1px solid #9b2c2c; color: #fed7d7; padding: 4px 8px; border-radius: 4px; cursor: pointer; font-size: 11px; }
+.btn-restore { background: #22543d; border: 1px solid #2f855a; color: #c6f6d5; padding: 4px 8px; border-radius: 4px; cursor: pointer; font-size: 11px; }
+.btn-restore:hover { background: #2f855a; }
+.btn-restore-sm { background: #22543d; border: 1px solid #2f855a; color: #c6f6d5; padding: 2px 6px; border-radius: 3px; cursor: pointer; font-size: 10px; margin-left: 8px; }
 
 .modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0, 0, 0, 0.7); z-index: 1000; align-items: center; justify-content: center; }
 .modal-overlay.active { display: flex; }
 .modal { background: #1e2533; border: 1px solid #4a5568; border-radius: 12px; width: 90vw; max-width: 1100px; max-height: 90vh; display: flex; flex-direction: column; overflow: hidden; box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5); }
 .modal-header { padding: 16px 20px; border-bottom: 1px solid #2d3748; display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
-.modal-title { font-size: 15px; font-weight: 600; color: #e2e8f0; }
+.modal-title { font-size: 15px; font-weight: 600; color: #e2e8f0; display: inline-flex; align-items: center; gap: 8px; }
+.modal-title-wrap { flex: 1; min-width: 0; }
+.title-edit-row { display: flex; gap: 6px; align-items: center; }
+.title-edit-input { background: #2d3748; border: 1px solid #4a5568; color: #e2e8f0; padding: 4px 10px; border-radius: 4px; font-size: 14px; width: 100%; max-width: 480px; }
+.title-edit-input:focus { outline: none; border-color: #63b3ed; }
+.title-edit-btn { padding: 4px 10px !important; }
+.title-edit-icon { background: none; border: none; cursor: pointer; font-size: 14px; padding: 0 2px; opacity: 0.6; transition: opacity 0.2s; }
+.title-edit-icon:hover { opacity: 1; }
 .modal-close { background: none; border: none; color: #718096; font-size: 20px; cursor: pointer; padding: 0 4px; }
 .modal-tabs { display: flex; border-bottom: 1px solid #2d3748; background: #1a202c; }
 .modal-tab { padding: 10px 18px; font-size: 12px; color: #718096; cursor: pointer; border-bottom: 2px solid transparent; white-space: nowrap; }
@@ -252,3 +263,27 @@ tr.row-selected:hover td { background: #2c4a67; }
 ::-webkit-scrollbar-track { background: #1a202c; }
 ::-webkit-scrollbar-thumb { background: #4a5568; border-radius: 3px; }
 * { scrollbar-width: thin; scrollbar-color: #4a5568 #1a202c; }
+
+
+/* Workspace Panel */
+.ws-list { display: flex; flex-direction: column; gap: 10px; }
+.ws-item { background: #2d3748; border: 1px solid #4a5568; border-radius: 8px; overflow: hidden; }
+.ws-header { display: flex; justify-content: space-between; align-items: center; padding: 12px 14px; cursor: pointer; gap: 12px; }
+.ws-header:hover { background: #353f52; }
+.ws-info { flex: 1; min-width: 0; }
+.ws-name { font-size: 14px; font-weight: 600; color: #e2e8f0; margin-bottom: 4px; word-break: break-all; }
+.ws-path { margin-bottom: 6px; word-break: break-all; }
+.ws-badges { display: flex; gap: 8px; flex-wrap: wrap; }
+.ws-badge { font-size: 10px; padding: 2px 8px; border-radius: 10px; font-weight: 600; }
+.ws-badge-active { background: rgba(104, 211, 145, 0.15); color: #68d391; border: 1px solid rgba(104, 211, 145, 0.35); }
+.ws-badge-deleted { background: rgba(252, 129, 129, 0.15); color: #fc8181; border: 1px solid rgba(252, 129, 129, 0.35); }
+.ws-badge-total { background: rgba(160, 174, 192, 0.15); color: #a0aec0; border: 1px solid rgba(160, 174, 192, 0.35); }
+.ws-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+.ws-expand-icon { font-size: 12px; color: #718096; }
+.ws-sessions { border-top: 1px solid #4a5568; padding: 12px; background: #1a202c; }
+.ws-session-table { width: 100%; border-collapse: collapse; }
+.ws-session-table th { background: #2d3748; color: #a0aec0; font-weight: 600; font-size: 11px; padding: 8px 10px; text-align: left; }
+.ws-session-table td { padding: 8px 10px; border-bottom: 1px solid #2d3748; vertical-align: top; }
+.ws-session-table tbody tr:hover td { background: #2d3748; }
+.ws-row-deleted td { opacity: 0.55; }
+.ws-session-title { font-size: 12px; font-weight: 500; color: #e2e8f0; }

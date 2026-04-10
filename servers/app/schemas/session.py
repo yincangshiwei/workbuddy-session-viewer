@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 from pydantic import BaseModel, Field
 
 
@@ -20,6 +22,23 @@ class DeleteResponse(BaseModel):
     dbDeleted: int = 0
     filesDeleted: int = 0
     deletedFiles: list[str] = Field(default_factory=list)
+
+
+class RestoreRequest(BaseModel):
+    ids: list[str] = Field(default_factory=list)
+
+
+class RestoreResponse(BaseModel):
+    success: bool
+    restored: int = 0
+
+
+class UpdateTitleRequest(BaseModel):
+    title: str
+
+
+class WorkspaceDeleteRequest(BaseModel):
+    cwd: str
 
 
 class ModelsConfigSaveRequest(BaseModel):

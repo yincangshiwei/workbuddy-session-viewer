@@ -8,6 +8,7 @@ import SessionStats from "./components/SessionStats";
 import SessionTable from "./components/SessionTable";
 import SessionToolbar from "./components/SessionToolbar";
 import ModelConfigPanel from "./components/ModelConfigPanel";
+import WorkspacePanel from "./components/WorkspacePanel";
 import ProcessingModal from "./components/ProcessingModal";
 import ShareResultModal from "./components/ShareResultModal";
 import ShareConfigModal from "./components/ShareConfigModal";
@@ -35,6 +36,7 @@ export default function App() {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   const [cwdFilter, setCwdFilter] = useState("");
+  const [deletedFilter, setDeletedFilter] = useState("");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
 
@@ -193,6 +195,8 @@ export default function App() {
       if (statusFilter && st !== statusFilter) return false;
       if (cwdFilter === "missing" && s.cwdExists) return false;
       if (cwdFilter === "exists" && !s.cwdExists) return false;
+      if (deletedFilter === "active" && s.deletedAt) return false;
+      if (deletedFilter === "deleted" && !s.deletedAt) return false;
       if (dateFrom) {
         const from = new Date(dateFrom).getTime();
         if (created < from) return false;
@@ -227,7 +231,7 @@ export default function App() {
     });
 
     return rows;
-  }, [sessions, search, statusFilter, cwdFilter, dateFrom, dateTo, sortField, sortDir]);
+  }, [sessions, search, statusFilter, cwdFilter, deletedFilter, dateFrom, dateTo, sortField, sortDir]);
 
   const totalPages = Math.max(1, Math.ceil(filteredRows.length / PAGE_SIZE));
 
@@ -244,13 +248,15 @@ export default function App() {
     const working = sessions.filter((s) => ["working", "inprogress"].includes((s.status || "").toLowerCase())).length;
     const missing = sessions.filter((s) => !s.cwdExists).length;
     const withFc = sessions.filter((s) => (s.fileChanges || []).length > 0).length;
-    return { total, completed, working, missing, withFc };
+    const deleted = sessions.filter((s) => s.deletedAt).length;
+    return { total, completed, working, missing, withFc, deleted };
   }, [sessions]);
 
   function clearFilters() {
     setSearch("");
     setStatusFilter("");
     setCwdFilter("");
+    setDeletedFilter("");
     setDateFrom("");
     setDateTo("");
     setCurrentPage(1);
@@ -317,6 +323,40 @@ export default function App() {
     } finally {
       setLoading(false);
     }
+  }
+
+  async function restoreSessions(ids) {
+    if (!ids || !ids.length) return;
+    setLoading(true);
+    setError("");
+    try {
+      const resp = await fetch("/api/restore", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids }),
+      });
+      const result = await resp.json();
+      if (!resp.ok || !result.success) {
+        throw new Error(result?.error || `恢复失败: ${resp.status}`);
+      }
+      // 刷新数据
+      await fetchSessions({ preserveUi: true });
+    } catch (e) {
+      setError(e.message || "恢复失败");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function handleTitleUpdate(conversationId, newTitle) {
+    setSessions((prev) =>
+      prev.map((s) =>
+        s.conversationId === conversationId ? { ...s, title: newTitle } : s
+      )
+    );
+    setDetail((prev) =>
+      prev && prev.conversationId === conversationId ? { ...prev, title: newTitle } : prev
+    );
   }
 
   async function exportSessions({ ids, selectedMediaPaths = [], uploadFiles = [] }) {
@@ -473,10 +513,12 @@ export default function App() {
 
   return (
     <>
-      <SessionHeader activePage={activePage} setActivePage={setActivePage} />
+      <SessionHeader activePage={activePage} setActivePage={setActivePage} autoRefreshing={autoRefreshing} countdown={countdown} />
 
       {activePage === "models" ? (
         <ModelConfigPanel />
+      ) : activePage === "workspaces" ? (
+        <WorkspacePanel />
       ) : (
         <>
           <SessionStats stats={stats} />
@@ -488,6 +530,8 @@ export default function App() {
             setStatusFilter={(v) => { setStatusFilter(v); setCurrentPage(1); }}
             cwdFilter={cwdFilter}
             setCwdFilter={(v) => { setCwdFilter(v); setCurrentPage(1); }}
+            deletedFilter={deletedFilter}
+            setDeletedFilter={(v) => { setDeletedFilter(v); setCurrentPage(1); }}
             dateFrom={dateFrom}
             setDateFrom={(v) => { setDateFrom(v); setCurrentPage(1); }}
             dateTo={dateTo}
@@ -501,11 +545,7 @@ export default function App() {
             shareSelected={shareSelected}
             selectedCount={selectedIds.size}
             openDeleteSelected={() => openDelete(Array.from(selectedIds))}
-
-            filteredCount={filteredRows.length}
-            totalCount={sessions.length}
-            autoRefreshing={autoRefreshing}
-            countdown={countdown}
+            restoreSelected={() => restoreSessions(Array.from(selectedIds))}
           />
 
           {error ? <div className="error">{error}</div> : null}
@@ -523,10 +563,11 @@ export default function App() {
             exportOne={exportOne}
             shareOne={shareOne}
             openDelete={openDelete}
+            onRestore={(ids) => restoreSessions(ids)}
 
           />
 
-          <Pagination currentPage={currentPage} totalPages={totalPages} setCurrentPage={setCurrentPage} />
+          <Pagination currentPage={currentPage} totalPages={totalPages} setCurrentPage={setCurrentPage} filteredCount={filteredRows.length} totalCount={sessions.length} />
 
           <SessionDetailModal
             detail={detail}
@@ -534,6 +575,7 @@ export default function App() {
             tab={tab}
             setTab={setTab}
             openDelete={openDelete}
+            onRestore={(ids) => restoreSessions(ids)}
             chatMap={chatMap}
             chatLoading={chatLoading}
             chatError={chatError}
@@ -547,6 +589,7 @@ export default function App() {
             workspaceData={currentWorkspace}
             workspaceLoading={workspaceLoading}
             workspaceError={workspaceError}
+            onTitleUpdate={handleTitleUpdate}
           />
 
           <DeleteConfirmModal
@@ -587,6 +630,3 @@ export default function App() {
     </>
   );
 }
-
-
-

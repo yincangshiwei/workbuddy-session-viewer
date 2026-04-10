@@ -7,9 +7,10 @@ export default function SessionToolbar({
   setCwdFilter,
   dateFrom,
   setDateFrom,
-
   dateTo,
   setDateTo,
+  deletedFilter,
+  setDeletedFilter,
   clearFilters,
   refresh,
   loading,
@@ -17,11 +18,7 @@ export default function SessionToolbar({
   shareSelected,
   selectedCount,
   openDeleteSelected,
-
-  filteredCount,
-  totalCount,
-  autoRefreshing,
-  countdown,
+  restoreSelected,
 }) {
   return (
     <div className="toolbar">
@@ -39,9 +36,13 @@ export default function SessionToolbar({
         <option value="missing">❌ 目录缺失</option>
         <option value="exists">✅ 目录存在</option>
       </select>
+      <select value={deletedFilter} onChange={(e) => { setDeletedFilter(e.target.value); }}>
+        <option value="">全部(含逻辑删除)</option>
+        <option value="active">✅ 正常会话</option>
+        <option value="deleted">🗑 逻辑删除</option>
+      </select>
 
       <div className="date-group">
-
         <span>从</span>
         <input type="date" value={dateFrom} onChange={(e) => { setDateFrom(e.target.value); }} />
         <span>到</span>
@@ -51,10 +52,8 @@ export default function SessionToolbar({
       <button onClick={refresh} disabled={loading}>{loading ? "处理中..." : "刷新"}</button>
       <button onClick={exportSelected} disabled={loading || selectedCount === 0}>导出对话({selectedCount})</button>
       <button onClick={shareSelected} disabled={loading || selectedCount === 0}>分享对话({selectedCount})</button>
+      <button className="btn-restore" onClick={restoreSelected} disabled={loading || selectedCount === 0}>恢复({selectedCount})</button>
       <button className="btn-danger" onClick={openDeleteSelected} disabled={loading || selectedCount === 0}>批量删除({selectedCount})</button>
-
-      <span className="countDisplay">显示 {filteredCount} / {totalCount} 条</span>
-      <span className={`auto-refresh-tip ${autoRefreshing ? "active" : ""}`}>{autoRefreshing ? "自动刷新中..." : `自动刷新倒计时：${countdown}s`}</span>
     </div>
   );
 }

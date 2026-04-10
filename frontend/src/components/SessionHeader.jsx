@@ -1,7 +1,10 @@
-export default function SessionHeader({ activePage, setActivePage }) {
+export default function SessionHeader({ activePage, setActivePage, autoRefreshing, countdown }) {
   return (
     <div className="header">
-      <h1>WorkBuddy 后台管理</h1>
+      <div className="header-title-row">
+        <h1>WorkBuddy 后台管理</h1>
+        <span className={`header-countdown ${autoRefreshing ? "active" : ""}`}>{autoRefreshing ? "..." : `${countdown}s`}</span>
+      </div>
       <p>数据来源：codebuddy-sessions.vscdb · todos · file-changes · media-index · %USERPROFILE%/.workbuddy/models.json</p>
       <div className="header-nav">
         <button
@@ -9,6 +12,12 @@ export default function SessionHeader({ activePage, setActivePage }) {
           onClick={() => setActivePage("sessions")}
         >
           会话管理
+        </button>
+        <button
+          className={`header-nav-btn ${activePage === "workspaces" ? "active" : ""}`}
+          onClick={() => setActivePage("workspaces")}
+        >
+          工作空间
         </button>
         <button
           className={`header-nav-btn ${activePage === "models" ? "active" : ""}`}
@@ -20,4 +29,3 @@ export default function SessionHeader({ activePage, setActivePage }) {
     </div>
   );
 }
-

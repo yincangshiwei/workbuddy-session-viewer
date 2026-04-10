@@ -9,6 +9,7 @@ export default function SessionDetailModal({
   tab,
   setTab,
   openDelete,
+  onRestore,
   chatMap,
   chatLoading,
   chatError,
@@ -22,8 +23,12 @@ export default function SessionDetailModal({
   workspaceData,
   workspaceLoading,
   workspaceError,
+  onTitleUpdate,
 }) {
   const [mediaActionKey, setMediaActionKey] = useState("");
+  const [editingTitle, setEditingTitle] = useState(false);
+  const [titleInput, setTitleInput] = useState("");
+  const [titleSaving, setTitleSaving] = useState(false);
 
   function buildOpenFileHref(filePath) {
     return `/api/local/open-file?path=${encodeURIComponent(filePath || "")}`;
@@ -47,6 +52,37 @@ export default function SessionDetailModal({
     } finally {
       setMediaActionKey((prev) => (prev === actionKey ? "" : prev));
     }
+  }
+
+  function startEditTitle() {
+    setTitleInput(detail?.title || "");
+    setEditingTitle(true);
+  }
+
+  async function saveTitle() {
+    const newTitle = titleInput.trim();
+    if (!newTitle) return;
+    setTitleSaving(true);
+    try {
+      const resp = await fetch(`/api/session/${encodeURIComponent(detail.conversationId)}/title`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: newTitle }),
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok) throw new Error(data?.detail || "修改标题失败");
+      setEditingTitle(false);
+      if (onTitleUpdate) onTitleUpdate(detail.conversationId, newTitle);
+    } catch (e) {
+      window.alert(e.message || "修改标题失败");
+    } finally {
+      setTitleSaving(false);
+    }
+  }
+
+  function cancelEditTitle() {
+    setEditingTitle(false);
+    setTitleInput("");
   }
 
 
@@ -90,8 +126,31 @@ export default function SessionDetailModal({
     <div className="modal-overlay active" onClick={() => setDetail(null)}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
-          <div className="modal-title">{detail.title || "(无标题)"}</div>
+          <div className="modal-title-wrap">
+            {editingTitle ? (
+              <div className="title-edit-row">
+                <input
+                  className="title-edit-input"
+                  value={titleInput}
+                  onChange={(e) => setTitleInput(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") saveTitle(); if (e.key === "Escape") cancelEditTitle(); }}
+                  autoFocus
+                  disabled={titleSaving}
+                />
+                <button className="btn-outline title-edit-btn" onClick={saveTitle} disabled={titleSaving}>{titleSaving ? "..." : "保存"}</button>
+                <button className="btn-outline title-edit-btn" onClick={cancelEditTitle} disabled={titleSaving}>取消</button>
+              </div>
+            ) : (
+              <div className="modal-title">
+                {detail.title || "(无标题)"}
+                <button className="title-edit-icon" onClick={startEditTitle} title="修改标题">✏️</button>
+              </div>
+            )}
+          </div>
           <div style={{ display: "flex", gap: 8 }}>
+            {detail.deletedAt ? (
+              <button className="btn-restore" onClick={() => onRestore && onRestore([detail.conversationId])}>恢复任务</button>
+            ) : null}
             <button className="btn-danger" onClick={() => openDelete([detail.conversationId])}>🗑 删除此任务</button>
             <button className="modal-close" onClick={() => setDetail(null)}>✕</button>
           </div>
@@ -115,7 +174,7 @@ export default function SessionDetailModal({
                 <div className="info-item"><div className="info-label">状态</div><div className="info-value">{detail.status}</div></div>
                 <div className="info-item"><div className="info-label">创建时间</div><div className="info-value">{detail.createdAt}</div></div>
                 <div className="info-item"><div className="info-label">更新时间</div><div className="info-value">{detail.updatedAt}</div></div>
-                <div className="info-item"><div className="info-label">逻辑删除时间</div><div className="info-value">{detail.deletedAt || "-"}</div></div>
+                <div className="info-item"><div className="info-label">逻辑删除时间</div><div className="info-value">{detail.deletedAt || "-"}{detail.deletedAt ? <button className="btn-restore-sm" onClick={() => onRestore && onRestore([detail.conversationId])}>恢复</button> : null}</div></div>
                 <div className="info-item full"><div className="info-label">工作目录</div><div className="info-value mono">{detail.cwd} {detail.cwdExists ? "✅" : "❌"}</div></div>
 
               </div>
