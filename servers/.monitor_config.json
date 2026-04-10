@@ -1,0 +1,12 @@
+{
+  "enabled": true,
+  "protocol": "https",
+  "url": "",
+  "headers": {},
+  "include_basic": true,
+  "include_full": false,
+  "include_user": true,
+  "include_assistant": false,
+  "batch_size": 50,
+  "retry_times": 3
+}

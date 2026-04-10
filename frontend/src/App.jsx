@@ -9,6 +9,7 @@ import SessionTable from "./components/SessionTable";
 import SessionToolbar from "./components/SessionToolbar";
 import ModelConfigPanel from "./components/ModelConfigPanel";
 import WorkspacePanel from "./components/WorkspacePanel";
+import AdminPanel from "./components/AdminPanel";
 import ProcessingModal from "./components/ProcessingModal";
 import ShareResultModal from "./components/ShareResultModal";
 import ShareConfigModal from "./components/ShareConfigModal";
@@ -19,6 +20,21 @@ import { PAGE_SIZE } from "./constants/session";
 import { copyToClipboard, extractUserQuery } from "./utils/session";
 
 export default function App() {
+  // ── 管理员模式检测 ──────────────────────────────────────────
+  // URL 中有 ?admin=true 且后端也以管理员模式启动时，才激活管理功能
+  const [isAdmin, setIsAdmin] = useState(false);
+
+  useEffect(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    if (urlParams.get("admin") === "true") {
+      // 向后端确认是否真的以管理员模式启动
+      fetch("/api/admin/status")
+        .then((r) => r.json())
+        .then((d) => { if (d?.admin) setIsAdmin(true); })
+        .catch(() => {});
+    }
+  }, []);
+
   const [sessions, setSessions] = useState([]);
   const [loading, setLoading] = useState(false);
   const [autoRefreshing, setAutoRefreshing] = useState(false);
@@ -513,12 +529,14 @@ export default function App() {
 
   return (
     <>
-      <SessionHeader activePage={activePage} setActivePage={setActivePage} autoRefreshing={autoRefreshing} countdown={countdown} />
+      <SessionHeader activePage={activePage} setActivePage={setActivePage} autoRefreshing={autoRefreshing} countdown={countdown} isAdmin={isAdmin} />
 
       {activePage === "models" ? (
         <ModelConfigPanel />
       ) : activePage === "workspaces" ? (
         <WorkspacePanel />
+      ) : activePage === "admin" && isAdmin ? (
+        <AdminPanel />
       ) : (
         <>
           <SessionStats stats={stats} />

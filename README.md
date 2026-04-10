@@ -14,7 +14,7 @@
 ```text
 servers/
   app/
-    main.py                 # 应用装配（FastAPI/CORS/静态托管）
+    main.py                 # 应用装配（FastAPI/CORS/静态托管，读取 WORKBUDDY_ADMIN 环境变量）
     api/
       router.py             # API 总路由聚合
       routes/
@@ -26,6 +26,7 @@ servers/
         restore.py          # 恢复逻辑删除会话
         title.py            # 修改会话标题
         workspaces.py       # 工作空间列表与删除
+        admin.py            # 管理员接口（模式状态、监控配置、上传触发）
     services/
       common.py             # 通用工具（时间/JSON/transcript索引等）
       session_service.py    # sessions 业务聚合
@@ -33,10 +34,13 @@ servers/
       export_service.py     # 导出（原始会话/HTML）
       import_service.py     # ZIP 导入
       delete_service.py     # DB与本地文件删除
+      monitor_service.py    # 数据监控上传（指纹缓存/变化检测/HTTP推送）
     schemas/
       session.py            # 请求/响应模型
     core/
       settings.py           # 环境变量与路径配置
+      admin_state.py        # 管理员模式全局状态
+      monitor_config.py     # 监控上传配置持久化（.monitor_config.json）
 ```
 
 ## 后端（servers）
@@ -55,11 +59,36 @@ servers/
 
 ### 启动（开发）
 
+普通模式：
+
 ```bash
 cd servers
 pip install -r requirements.txt
 python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 9877
 ```
+
+管理员模式（Windows PowerShell）：
+
+```powershell
+cd servers
+$env:WORKBUDDY_ADMIN="1"; python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 9877
+```
+
+管理员模式（Windows CMD）：
+
+```cmd
+cd servers
+set WORKBUDDY_ADMIN=1 && python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 9877
+```
+
+管理员模式（Linux / macOS）：
+
+```bash
+cd servers
+WORKBUDDY_ADMIN=1 python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 9877
+```
+
+启动后访问 `http://localhost:9877?admin=true` 即可进入管理员界面。
 
 后端接口：
 
@@ -79,6 +108,19 @@ python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 9877
 - `PUT /api/session/{conversationId}/title`：修改指定会话的标题
 - `GET /api/workspaces`：按工作目录聚合所有会话，返回工作空间列表
 - `DELETE /api/workspace`：删除工作目录（仅允许 DB 中该 cwd 下无任何会话记录时操作）
+
+### 管理员模式接口（需以管理员模式启动）
+
+- `GET /api/admin/status`：查询当前是否为管理员模式（所有人可访问，用于前端判断）
+- `GET /api/admin/monitor/config`：获取监控上传配置
+- `POST /api/admin/monitor/config`：保存监控上传配置
+- `POST /api/admin/monitor/upload`：手动触发单个会话的监控上传
+- `POST /api/admin/monitor/upload-batch`：批量触发多个会话的监控上传
+- `GET /api/admin/monitor/cache-stats`：获取已上传消息的指纹缓存统计
+- `POST /api/admin/monitor/clear-cache`：清除指纹缓存（可指定单个会话或全部）
+- `GET /api/admin/monitor/errors`：获取最近上传失败错误日志
+- `GET /api/admin/machine-info`：获取本机环境信息（主机名、域账号、内外网IP、OS等）
+- `POST /api/admin/machine-info/refresh`：强制重新采集机器信息（公网IP变化时使用）
 
 
 ## 前端（frontend）
@@ -113,6 +155,7 @@ frontend/
       ShareResultModal.jsx       # 分享结果弹窗（复制/打开链接）
       ModelConfigPanel.jsx       # 模型配置页面
       WorkspacePanel.jsx         # 工作空间页面（工作目录聚合管理）
+      AdminPanel.jsx             # 管理配置页面（仅管理员模式可见）
 
 ```
 
@@ -132,6 +175,11 @@ npm run dev
 ```
 
 开发阶段通过 Vite 代理 `/api` 到 `http://127.0.0.1:9877`。
+
+前端以开发模式启动后，根据后端启动方式访问对应地址：
+
+- 普通模式：`http://localhost:5173`
+- 管理员模式：`http://localhost:5173?admin=true`
 
 ## 生产构建与部署模式
 
@@ -256,9 +304,11 @@ WorkBuddy 客户端删除任务时，不会物理删除数据库记录，而是�
 
 ## 一键启动（推荐）
 
-项目根目录提供 `start_server.bat`，双击即可完成自动更新、环境检查、依赖安装并启动后端服务，浏览器会自动打开。
+项目根目录提供两种启动脚本，双击即可完成自动更新、环境检查、依赖安装并启动后端服务，浏览器会自动打开。
 
 **适用系统：** Windows
+
+### 普通启动
 
 **使用方式：** 直接双击 `start_server.bat`
 
@@ -271,11 +321,118 @@ WorkBuddy 客户端删除任务时，不会物理删除数据库记录，而是�
 | 第 3 步 | 安装所需组件 | 自动执行 `pip install -r requirements.txt`，已安装的依赖会跳过，首次运行约需 1-3 分钟 |
 | 第 4 步 | 启动服务 | 启动 FastAPI 后端，3 秒后自动用默认浏览器打开 `http://localhost:9877` |
 
+### 管理员模式启动
+
+**使用方式：** 直接双击 `start_server_admin.bat`
+
+与普通启动流程相同，但会额外设置环境变量 `WORKBUDDY_ADMIN=1`，激活管理员模式，浏览器自动打开 `http://localhost:9877?admin=true`。
+
+管理员模式下，页面顶部导航会出现「🔧 管理配置」入口，可访问管理功能模块（见下方[管理员模式](#管理员模式)说明）。
+
 > 运行期间请保持命令窗口开启，关闭窗口即停止服务。
 
 **前提条件：**
 - 已安装 Python 3.9 或以上版本，且安装时勾选了 "Add Python to PATH"
 - Git（可选）：安装后可享受自动更新功能，下载地址：https://git-scm.com/download/win
+
+---
+
+## 管理员模式
+
+### 激活方式
+
+启动时设置环境变量 `WORKBUDDY_ADMIN=1`（推荐使用 `start_server_admin.bat`），然后在浏览器 URL 中附加 `?admin=true`：
+
+```
+http://localhost:9877?admin=true
+```
+
+前端会向后端 `GET /api/admin/status` 确认是否真的以管理员模式启动，**两者同时满足才会显示管理菜单**，单独修改 URL 参数无效。
+
+### 管理配置页面
+
+进入「🔧 管理配置」页面后，目前包含以下功能模块：
+
+#### 本机环境信息
+
+页面顶部展示当前运行机器的环境信息，这些信息会随每次上传数据一起发送到目标服务器，用于接收端判断数据来源。
+
+| 字段 | 说明 |
+|---|---|
+| 主机名 | `socket.gethostname()` 获取 |
+| 域账号 | Windows 下取 `USERDOMAIN\USERNAME`，其他系统取 `USER` |
+| 内网 IP | 枚举本机所有非回环网卡 IP |
+| 公网 IP | 依次请求 `ipify` / `ifconfig.me` / `ip.sb` 获取，全部失败则留空 |
+| 操作系统 | 系统名称、发行版本、完整版本号 |
+| 架构 | 处理器架构（如 AMD64） |
+
+> 机器信息在服务进程启动后**只采集一次**并缓存，避免重复请求外网。公网 IP 变化时可点击「重新采集」按钮手动刷新。
+
+#### 数据监控上传
+
+实时监控所有活跃会话的对话内容，检测到新消息或内容变化时自动上传到指定服务器，可用于行为分析等场景。
+
+**核心特性：**
+
+| 特性 | 说明 |
+|---|---|
+| 首次全量同步 | 每次点击「启动监控」时，会先清除指纹缓存并对所有现有数据执行一次全量同步，确保历史数据不遗漏 |
+| 变化检测 | 对每条消息计算 MD5 指纹（基于 role/text/toolEvents/isComplete），只有内容发生变化才触发上传 |
+| 去重上传 | 已上传且无变化的消息不会重复推送，节省带宽 |
+| 实时轮询 | 前端每 10 秒自动检测一次，发现变化立即上传 |
+| 失败重试 | 上传失败时按配置次数自动重试，错误日志在页面内实时展示 |
+
+**上传数据范围（可选）：**
+
+| 维度 | 选项 | 默认 |
+|---|---|---|
+| 对话类型 | 基础对话（user/assistant 文本，不含工具调用）/ 完整对话（含工具调用/结果） | 基础对话 ✓ |
+| 角色筛选 | user 消息 / assistant 消息 | 仅 user ✓ |
+
+**上传数据格式（HTTP/HTTPS POST JSON）：**
+
+```json
+{
+  "conversationId": "xxx",
+  "timestamp": 1712345678000,
+  "machine": {
+    "hostname": "PC-NAME",
+    "domain_user": "DOMAIN\\username",
+    "local_ips": ["192.168.1.100"],
+    "public_ip": "1.2.3.4",
+    "os": "Windows",
+    "os_release": "10",
+    "os_version": "10.0.19045",
+    "machine": "AMD64",
+    "python_version": "3.11.0",
+    "collected_at": "2026-04-10 16:30:00"
+  },
+  "messages": [
+    {
+      "id": "msg-id",
+      "role": "user",
+      "text": "用户输入内容",
+      "createdAt": "2026-04-10 16:00:00"
+    }
+  ]
+}
+```
+
+**支持协议：** HTTPS POST（默认）/ HTTP POST
+
+**配置项说明：**
+
+| 配置项 | 默认值 | 说明 |
+|---|---|---|
+| 启用监控上传 | 关 | 总开关，关闭时不会进行任何上传 |
+| 上传协议 | HTTPS | HTTP 或 HTTPS |
+| 目标上传地址 | 空 | 接收数据的服务器 URL |
+| 自定义请求头 | 空 | 可添加鉴权 Token 等 Header |
+| 失败重试次数 | 3 | 上传失败后的重试次数（1-10） |
+| 上传 user 消息 | ✓ | 是否包含用户发送的消息 |
+| 上传 assistant 消息 | 关 | 是否包含 AI 回复内容 |
+
+配置保存在 `servers/.monitor_config.json`，重启后自动恢复。
 
 ---
 
