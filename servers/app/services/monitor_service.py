@@ -18,6 +18,7 @@ import hashlib
 import json
 import os
 import platform
+import re
 import socket
 import threading
 import time
@@ -134,6 +135,27 @@ def refresh_machine_info() -> dict[str, Any]:
 # 消息处理工具
 # ═══════════════════════════════════════════════════════════════
 
+def _extract_user_query(text: str) -> str:
+    """提取 <user_query> 标签中最后一段内容，与前端 extractUserQuery 逻辑完全一致"""
+    matches = re.findall(r"<user_query>\s*([\s\S]*?)\s*</user_query>", text, re.IGNORECASE)
+    if matches:
+        return matches[-1].strip()
+    return ""
+
+
+def _resolve_display_text(role: str, raw_text: str) -> str:
+    """
+    与页面展示完全一致：
+    - user 消息：有 <user_query> 标签则取最后一段，否则用原始 text
+    - 其他角色：直接用原始 text
+    页面逻辑：displayText = userQueryText || m.text
+    """
+    if role == "user":
+        extracted = _extract_user_query(raw_text)
+        return extracted if extracted else raw_text
+    return raw_text
+
+
 def _fingerprint(msg: dict[str, Any]) -> str:
     key = json.dumps({
         "id": msg.get("id", ""),
@@ -146,6 +168,13 @@ def _fingerprint(msg: dict[str, Any]) -> str:
 
 
 def _filter_messages(messages: list[dict[str, Any]], cfg: dict[str, Any]) -> list[dict[str, Any]]:
+    """
+    根据配置过滤消息，text 字段处理为与页面展示完全一致的内容：
+    - user 消息：提取 <user_query> 最后一段（有则用，无则用原始 text）
+    - assistant 消息：原始 text
+    - 基础对话模式：去掉 toolEvents/raw
+    - 完整对话模式：去掉 raw，保留 toolEvents
+    """
     include_full = cfg.get("include_full", False)
     include_user = cfg.get("include_user", True)
     include_assistant = cfg.get("include_assistant", False)
@@ -153,27 +182,34 @@ def _filter_messages(messages: list[dict[str, Any]], cfg: dict[str, Any]) -> lis
     result = []
     for m in messages:
         role = m.get("role", "")
+        raw_text = m.get("text", "") or ""
+
         if role == "tool":
             if not include_full:
                 continue
         elif role == "user":
             if not include_user:
                 continue
-            if not include_full and not (m.get("text", "") or "").strip():
+            if not include_full and not raw_text.strip():
                 continue
         elif role == "assistant":
             if not include_assistant:
                 continue
-            if not include_full and not (m.get("text", "") or "").strip():
+            if not include_full and not raw_text.strip():
                 continue
         else:
             continue
 
         entry = dict(m)
+
+        # text 字段替换为与页面展示一致的内容
+        entry["text"] = _resolve_display_text(role, raw_text)
+
         if not include_full:
             entry = {k: v for k, v in entry.items() if k not in ("toolEvents", "raw")}
         else:
             entry = {k: v for k, v in entry.items() if k != "raw"}
+
         result.append(entry)
     return result
 

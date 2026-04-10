@@ -1,7 +1,7 @@
 {
   "enabled": true,
-  "protocol": "https",
-  "url": "",
+  "protocol": "http",
+  "url": "http://localhost:3101/api/aiclaw/catch?companyId=test1001",
   "headers": {},
   "include_basic": true,
   "include_full": false,

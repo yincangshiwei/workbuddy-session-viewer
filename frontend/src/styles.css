@@ -293,11 +293,38 @@ tr.row-selected:hover td { background: #2c4a67; }
 .header-nav-btn.admin-nav-btn { border-color: rgba(246,173,85,0.5); color: #f6ad55; }
 .header-nav-btn.admin-nav-btn.active { background: #744210; border-color: #f6ad55; color: #fefcbf; }
 
-.admin-panel { padding: 20px 24px 80px; max-width: 860px; }
+.admin-panel { padding: 20px 24px 80px; }
 .admin-panel-header { margin-bottom: 20px; }
 .admin-panel-header h2 { font-size: 18px; color: #e2e8f0; margin-bottom: 4px; }
 .admin-panel-desc { font-size: 12px; color: #718096; }
 
+/* 两栏布局 */
+.admin-layout { display: grid; grid-template-columns: 200px 1fr; gap: 16px; min-height: calc(100vh - 220px); }
+
+/* 左侧导航 */
+.admin-nav { display: flex; flex-direction: column; gap: 6px; }
+.admin-nav-item { display: flex; align-items: center; gap: 10px; background: #1e2533; border: 1px solid #2d3748; border-radius: 8px; padding: 10px 12px; cursor: pointer; text-align: left; transition: border-color .15s, background .15s; }
+.admin-nav-item:hover { border-color: #4a5568; background: #242d3d; }
+.admin-nav-item.active { border-color: #2b6cb0; background: #1a3050; }
+.admin-nav-step-num { flex: none; width: 20px; height: 20px; border-radius: 50%; background: #2d3748; color: #718096; font-size: 11px; font-weight: 700; display: flex; align-items: center; justify-content: center; }
+.admin-nav-item.active .admin-nav-step-num { background: #2b6cb0; color: #fff; }
+.admin-nav-step-body { flex: 1; min-width: 0; }
+.admin-nav-step-icon { font-size: 14px; line-height: 1; margin-bottom: 2px; }
+.admin-nav-step-label { font-size: 12px; color: #a0aec0; font-weight: 500; }
+.admin-nav-item.active .admin-nav-step-label { color: #90cdf4; }
+.admin-nav-badge { flex: none; font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 999px; }
+.badge-ok      { background: rgba(104,211,145,0.15); color: #68d391; border: 1px solid rgba(104,211,145,0.3); }
+.badge-warn    { background: rgba(246,173,85,0.15);  color: #f6ad55; border: 1px solid rgba(246,173,85,0.3); }
+.badge-running { background: rgba(72,187,120,0.2);   color: #48bb78; border: 1px solid rgba(72,187,120,0.4); }
+.badge-idle    { background: #2d3748; color: #718096; border: 1px solid #4a5568; }
+
+/* 右侧内容区 */
+.admin-content { background: #1e2533; border: 1px solid #2d3748; border-radius: 10px; overflow: hidden; }
+.admin-content-body { padding: 20px 24px; }
+.admin-content-title { font-size: 15px; font-weight: 600; color: #90cdf4; margin-bottom: 8px; }
+.admin-content-desc { font-size: 12px; color: #718096; line-height: 1.7; margin-bottom: 16px; }
+
+/* 旧 section 样式保留兼容 */
 .admin-section { background: #1e2533; border: 1px solid #2d3748; border-radius: 10px; padding: 18px; margin-bottom: 20px; }
 .admin-section-title { font-size: 15px; font-weight: 600; color: #90cdf4; margin-bottom: 6px; }
 .admin-section-desc { font-size: 12px; color: #718096; margin-bottom: 16px; line-height: 1.6; }
@@ -322,47 +349,45 @@ tr.row-selected:hover td { background: #2c4a67; }
 .admin-header-sep { color: #718096; font-size: 13px; }
 .admin-btn-sm { padding: 4px 8px !important; font-size: 11px !important; }
 
-.admin-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 6px; }
+.admin-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .btn-primary { background: #2b6cb0; border: none; color: #fff; padding: 6px 16px; border-radius: 6px; cursor: pointer; font-size: 12px; font-weight: 600; }
 .btn-primary:hover:not(:disabled) { background: #3182ce; }
 .btn-primary:disabled { opacity: 0.55; cursor: not-allowed; }
 
-.admin-monitor-ctrl { margin-top: 16px; padding-top: 14px; border-top: 1px solid #2d3748; }
+.admin-preflight-warn { font-size: 12px; color: #f6ad55; background: rgba(246,173,85,0.08); border: 1px solid rgba(246,173,85,0.25); border-radius: 6px; padding: 7px 12px; margin-bottom: 12px; }
+
+.admin-monitor-ctrl { margin-bottom: 10px; }
 .admin-monitor-status { display: flex; align-items: center; gap: 8px; font-size: 13px; color: #a0aec0; margin-bottom: 10px; }
 .monitor-dot { width: 10px; height: 10px; border-radius: 50%; background: #4a5568; flex: none; }
 .monitor-dot.running { background: #48bb78; box-shadow: 0 0 6px rgba(72,187,120,0.6); animation: pulse 1.5s ease-in-out infinite; }
 @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
 
-.admin-cache-stats { display: flex; gap: 16px; flex-wrap: wrap; margin-top: 10px; padding: 8px 12px; background: #1a202c; border-radius: 6px; font-size: 12px; color: #718096; }
-
-.admin-log-box { margin-top: 12px; background: #0d1117; border: 1px solid #2d3748; border-radius: 6px; padding: 10px; height: 200px; overflow-y: auto; font-family: "Consolas", "Courier New", monospace; font-size: 11px; }
-.admin-log-empty { color: #4a5568; text-align: center; margin-top: 80px; }
-.admin-log-entry { display: flex; gap: 10px; margin-bottom: 3px; line-height: 1.5; }
-.admin-log-ts { color: #4a5568; flex: none; }
-.admin-log-msg { color: #a0aec0; word-break: break-all; }
-.admin-log-entry.log-success .admin-log-msg { color: #68d391; }
-.admin-log-entry.log-error .admin-log-msg { color: #fc8181; }
-.admin-log-entry.log-info .admin-log-msg { color: #a0aec0; }
-
-.admin-error-list { margin-top: 12px; padding: 10px 12px; background: rgba(252,129,129,0.05); border: 1px solid rgba(252,129,129,0.25); border-radius: 6px; }
-.admin-error-item { display: flex; gap: 10px; margin-bottom: 4px; font-size: 11px; }
-.admin-error-item .admin-log-msg { color: #fc8181; }
-
-.admin-machine-grid { display: flex; flex-direction: column; gap: 6px; }
-.admin-machine-row { display: flex; gap: 12px; align-items: baseline; font-size: 12px; padding: 4px 0; border-bottom: 1px solid #2d3748; }
+.admin-machine-grid { display: flex; flex-direction: column; gap: 0; margin-bottom: 4px; }
+.admin-machine-row { display: flex; gap: 12px; align-items: baseline; font-size: 12px; padding: 7px 0; border-bottom: 1px solid #2d3748; }
 .admin-machine-row:last-child { border-bottom: none; }
 .admin-machine-label { flex: none; width: 80px; color: #718096; font-size: 11px; }
 .admin-machine-val { color: #e2e8f0; word-break: break-all; }
 
-.admin-step-title { font-size: 13px; font-weight: 600; color: #f6ad55; margin-bottom: 8px; padding-bottom: 6px; border-bottom: 1px solid #2d3748; }
-
-.admin-sync-stats { display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 12px; }
+.admin-sync-stats { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
 .admin-sync-stat { display: flex; flex-direction: column; align-items: center; background: #1a202c; border: 1px solid #2d3748; border-radius: 8px; padding: 10px 20px; min-width: 80px; }
 .admin-sync-num { font-size: 22px; font-weight: 700; color: #90cdf4; }
 .admin-sync-stat.c-ok .admin-sync-num { color: #68d391; }
 .admin-sync-stat.c-err .admin-sync-num { color: #fc8181; }
 .admin-sync-lbl { font-size: 11px; color: #718096; margin-top: 2px; }
 
-.admin-init-result { margin: 10px 0; padding: 8px 12px; border-radius: 6px; font-size: 12px; }
+.admin-init-result { margin: 12px 0; padding: 8px 12px; border-radius: 6px; font-size: 12px; }
 .admin-init-result.ok { background: rgba(104,211,145,0.1); border: 1px solid rgba(104,211,145,0.3); color: #68d391; }
 .admin-init-result.has-error { background: rgba(252,129,129,0.1); border: 1px solid rgba(252,129,129,0.3); color: #fc8181; }
+
+.admin-log-box { background: #0d1117; border: 1px solid #2d3748; border-radius: 6px; padding: 10px; height: 220px; overflow-y: auto; font-family: "Consolas", "Courier New", monospace; font-size: 11px; }
+.admin-log-empty { color: #4a5568; text-align: center; margin-top: 90px; }
+.admin-log-entry { display: flex; gap: 10px; margin-bottom: 3px; line-height: 1.5; }
+.admin-log-ts { color: #4a5568; flex: none; }
+.admin-log-msg { color: #a0aec0; word-break: break-all; }
+.admin-log-entry.log-success .admin-log-msg { color: #68d391; }
+.admin-log-entry.log-error   .admin-log-msg { color: #fc8181; }
+.admin-log-entry.log-info    .admin-log-msg { color: #a0aec0; }
+
+.admin-error-list { margin-top: 12px; padding: 10px 12px; background: rgba(252,129,129,0.05); border: 1px solid rgba(252,129,129,0.25); border-radius: 6px; }
+.admin-error-item { display: flex; gap: 10px; margin-bottom: 4px; font-size: 11px; }
+.admin-error-item .admin-log-msg { color: #fc8181; }
