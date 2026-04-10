@@ -1,11 +1,17 @@
 from __future__ import annotations
 
 """
-监控上传服务：
-- 维护已上传消息的指纹缓存（conversationId -> {msgId -> fingerprint}）
-- 检测变化后调用目标 URL 上传
-- 支持 http/https POST 协议
-- 上传 payload 包含本机环境信息（主机名、域账号、内网IP、公网IP、OS等）
+监控上传服务（SQLite 持久化版本）
+
+流程：
+1. 初始化（initialize_sync）：
+   - 从所有活跃会话读取消息，写入 SQLite，状态全部置为"未同步"
+   - 换服务地址/重置时调用此接口
+
+2. 监控轮询（check_and_upload_all / check_and_upload）：
+   - 读取当前会话消息，与 DB 中指纹对比
+   - 新消息/内容变化 → upsert 到 DB（状态=未同步）
+   - 取出 DB 中所有未同步记录 → 上传 → 成功后标记为已同步
 """
 
 import hashlib
@@ -20,37 +26,41 @@ from typing import Any
 import httpx
 
 from app.core.monitor_config import load_config
+from app.core.monitor_db import (
+    get_stats,
+    get_unsynced,
+    mark_synced,
+    reset_all,
+    upsert_messages,
+)
 from app.services.chat_service import load_conversation_chat
+from app.services.session_service import load_sessions
 
-
-# ── 已上传消息指纹缓存 ─────────────────────────────────────────
-_uploaded_cache: dict[str, dict[str, str]] = {}
-_cache_lock = threading.Lock()
 
 # ── 上传失败记录 ───────────────────────────────────────────────
 _upload_errors: list[dict[str, Any]] = []
+_errors_lock = threading.Lock()
 _MAX_ERRORS = 100
 
-# ── 机器信息缓存（进程生命周期内只采集一次）────────────────────
+# ── 机器信息缓存 ───────────────────────────────────────────────
 _machine_info: dict[str, Any] | None = None
-_machine_info_lock = threading.Lock()
+_machine_lock = threading.Lock()
 
+
+# ═══════════════════════════════════════════════════════════════
+# 机器信息采集
+# ═══════════════════════════════════════════════════════════════
 
 def _collect_local_ips() -> list[str]:
-    """采集本机所有内网 IP（排除回环）"""
-    ips = []
+    ips: list[str] = []
     try:
         hostname = socket.gethostname()
-        infos = socket.getaddrinfo(hostname, None)
-        seen = set()
-        for info in infos:
+        for info in socket.getaddrinfo(hostname, None):
             ip = info[4][0]
-            if ip not in seen and not ip.startswith("127.") and not ip.startswith("::1"):
-                seen.add(ip)
+            if ip not in ips and not ip.startswith("127.") and ip != "::1":
                 ips.append(ip)
     except Exception:
         pass
-    # 备用方式：connect 外网取本机出口 IP
     if not ips:
         try:
             s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -63,16 +73,15 @@ def _collect_local_ips() -> list[str]:
 
 
 def _fetch_public_ip() -> str:
-    """获取公网 IP，依次尝试多个服务"""
     services = [
-        ("https://api.ipify.org?format=json", lambda d: d.get("ip", "")),
+        ("https://api.ipify.org?format=json", lambda d: d.get("ip", "") if isinstance(d, dict) else ""),
         ("https://ifconfig.me/ip", lambda d: d.strip() if isinstance(d, str) else ""),
         ("https://ip.sb", lambda d: d.strip() if isinstance(d, str) else ""),
     ]
     for url, extractor in services:
         try:
-            with httpx.Client(timeout=5) as client:
-                resp = client.get(url, headers={"User-Agent": "curl/7.0"})
+            with httpx.Client(timeout=5) as c:
+                resp = c.get(url, headers={"User-Agent": "curl/7.0"})
                 if resp.status_code == 200:
                     try:
                         result = extractor(resp.json())
@@ -85,40 +94,25 @@ def _fetch_public_ip() -> str:
     return ""
 
 
-def _get_domain_user() -> str:
-    """获取域账号（Windows: DOMAIN\\user，其他: user@hostname）"""
-    try:
-        # Windows 优先取 USERDOMAIN\USERNAME
-        domain = os.environ.get("USERDOMAIN", "")
-        user = os.environ.get("USERNAME", "") or os.environ.get("USER", "")
-        if domain and domain.upper() != socket.gethostname().upper():
-            return f"{domain}\\{user}"
-        return user
-    except Exception:
-        return ""
-
-
 def collect_machine_info() -> dict[str, Any]:
-    """采集本机环境信息，结果缓存在进程内存中"""
     global _machine_info
-    with _machine_info_lock:
+    with _machine_lock:
         if _machine_info is not None:
             return dict(_machine_info)
-
         hostname = ""
         try:
             hostname = socket.gethostname()
         except Exception:
             pass
-
-        local_ips = _collect_local_ips()
-        public_ip = _fetch_public_ip()
+        domain = os.environ.get("USERDOMAIN", "")
+        user = os.environ.get("USERNAME", "") or os.environ.get("USER", "")
+        domain_user = f"{domain}\\{user}" if domain and domain.upper() != hostname.upper() else user
 
         _machine_info = {
             "hostname": hostname,
-            "domain_user": _get_domain_user(),
-            "local_ips": local_ips,
-            "public_ip": public_ip,
+            "domain_user": domain_user,
+            "local_ips": _collect_local_ips(),
+            "public_ip": _fetch_public_ip(),
             "os": platform.system(),
             "os_version": platform.version(),
             "os_release": platform.release(),
@@ -130,17 +124,17 @@ def collect_machine_info() -> dict[str, Any]:
 
 
 def refresh_machine_info() -> dict[str, Any]:
-    """强制重新采集机器信息（公网 IP 可能变化时调用）"""
     global _machine_info
-    with _machine_info_lock:
+    with _machine_lock:
         _machine_info = None
     return collect_machine_info()
 
 
-# ── 消息处理 ──────────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════
+# 消息处理工具
+# ═══════════════════════════════════════════════════════════════
 
 def _fingerprint(msg: dict[str, Any]) -> str:
-    """计算消息指纹，用于判断是否变化"""
     key = json.dumps({
         "id": msg.get("id", ""),
         "role": msg.get("role", ""),
@@ -152,8 +146,6 @@ def _fingerprint(msg: dict[str, Any]) -> str:
 
 
 def _filter_messages(messages: list[dict[str, Any]], cfg: dict[str, Any]) -> list[dict[str, Any]]:
-    """根据配置过滤消息"""
-    include_basic = cfg.get("include_basic", True)
     include_full = cfg.get("include_full", False)
     include_user = cfg.get("include_user", True)
     include_assistant = cfg.get("include_assistant", False)
@@ -179,29 +171,95 @@ def _filter_messages(messages: list[dict[str, Any]], cfg: dict[str, Any]) -> lis
 
         entry = dict(m)
         if not include_full:
-            entry = {k: v for k, v in entry.items() if k != "toolEvents" and k != "raw"}
+            entry = {k: v for k, v in entry.items() if k not in ("toolEvents", "raw")}
         else:
             entry = {k: v for k, v in entry.items() if k != "raw"}
-
         result.append(entry)
     return result
 
 
-def _do_upload(url: str, headers: dict[str, str], payload: dict[str, Any], retry: int) -> bool:
-    """执行 HTTP POST 上传，失败时重试"""
-    err = "未知错误"
-    for attempt in range(max(1, retry)):
+# ═══════════════════════════════════════════════════════════════
+# 初始化：清空 DB，重新扫描所有会话写入，状态=未同步
+# ═══════════════════════════════════════════════════════════════
+
+def initialize_sync() -> dict[str, Any]:
+    """
+    初始化同步数据：
+    1. 读取所有活跃会话的消息（按当前配置过滤）
+    2. 清空 DB，写入全部消息，状态=未同步
+    返回 {total: int, conversations: int, error: str|None}
+    """
+    cfg = load_config()
+    sessions = load_sessions()
+    active = [s for s in sessions if not s.get("deletedAt")]
+
+    all_rows: list[dict[str, Any]] = []
+    errors: list[str] = []
+
+    for s in active:
+        cid = s.get("conversationId", "")
+        if not cid:
+            continue
         try:
-            with httpx.Client(timeout=15) as client:
-                resp = client.post(url, json=payload, headers=headers)
-                if resp.status_code < 400:
-                    return True
-                err = f"HTTP {resp.status_code}: {resp.text[:200]}"
+            chat = load_conversation_chat(cid)
+            filtered = _filter_messages(chat.get("messages", []), cfg)
+            for m in filtered:
+                all_rows.append({
+                    "conversation_id": cid,
+                    "message_id": m.get("id", ""),
+                    "role": m.get("role", ""),
+                    "fingerprint": _fingerprint(m),
+                    "created_at": m.get("createdAt", ""),
+                })
         except Exception as e:
-            err = str(e)
-        if attempt < retry - 1:
-            time.sleep(1.5 * (attempt + 1))
-    with _cache_lock:
+            errors.append(f"{cid}: {e}")
+
+    total = reset_all(all_rows)
+    return {
+        "total": total,
+        "conversations": len(active),
+        "errors": errors,
+        "error": errors[0] if errors else None,
+    }
+
+
+# ═══════════════════════════════════════════════════════════════
+# 增量检测：扫描单个会话，更新 DB 中的变化
+# ═══════════════════════════════════════════════════════════════
+
+def _scan_conversation(cid: str, cfg: dict[str, Any]) -> dict[str, int]:
+    """
+    扫描单个会话，将新消息/变化消息 upsert 到 DB（状态=未同步）。
+    返回 {new, changed, unchanged}
+    """
+    try:
+        chat = load_conversation_chat(cid)
+        filtered = _filter_messages(chat.get("messages", []), cfg)
+    except Exception:
+        return {"new": 0, "changed": 0, "unchanged": 0}
+
+    rows = [{
+        "conversation_id": cid,
+        "message_id": m.get("id", ""),
+        "role": m.get("role", ""),
+        "fingerprint": _fingerprint(m),
+        "created_at": m.get("createdAt", ""),
+    } for m in filtered]
+
+    diff = upsert_messages(rows)
+    return {
+        "new": len(diff["new"]),
+        "changed": len(diff["changed"]),
+        "unchanged": len(diff["unchanged"]),
+    }
+
+
+# ═══════════════════════════════════════════════════════════════
+# 上传：取出 DB 未同步记录 → 拼装消息内容 → POST → 标记已同步
+# ═══════════════════════════════════════════════════════════════
+
+def _record_error(url: str, err: str) -> None:
+    with _errors_lock:
         _upload_errors.append({
             "time": time.strftime("%Y-%m-%d %H:%M:%S"),
             "url": url,
@@ -209,82 +267,160 @@ def _do_upload(url: str, headers: dict[str, str], payload: dict[str, Any], retry
         })
         if len(_upload_errors) > _MAX_ERRORS:
             _upload_errors.pop(0)
-    return False
 
 
-def check_and_upload(conversation_id: str) -> dict[str, Any]:
+def _do_upload(url: str, headers: dict[str, str], payload: dict[str, Any], retry: int) -> tuple[bool, str]:
+    err = "未知错误"
+    for attempt in range(max(1, retry)):
+        try:
+            with httpx.Client(timeout=15) as c:
+                resp = c.post(url, json=payload, headers=headers)
+                if resp.status_code < 400:
+                    return True, ""
+                err = f"HTTP {resp.status_code}: {resp.text[:200]}"
+        except Exception as e:
+            err = str(e)
+        if attempt < retry - 1:
+            time.sleep(1.5 * (attempt + 1))
+    _record_error(url, err)
+    return False, err
+
+
+def _build_message_content(unsynced_rows: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
     """
-    检查指定会话的消息变化并上传。
-    返回: {uploaded: int, skipped: int, error: str|None}
+    按 conversation_id 分组，从磁盘重新读取消息内容（指纹只做比对，内容要实时读）。
+    返回 {cid: [message, ...]}
+    """
+    from app.services.common import resolve_transcript_index, safe_json, ts_to_text
+    import json as _json
+
+    # 按会话分组
+    by_conv: dict[str, list[str]] = {}
+    for row in unsynced_rows:
+        cid = row["conversation_id"]
+        mid = row["message_id"]
+        by_conv.setdefault(cid, []).append(mid)
+
+    result: dict[str, list[dict[str, Any]]] = {}
+    for cid, mids in by_conv.items():
+        mid_set = set(mids)
+        try:
+            chat = load_conversation_chat(cid)
+            cfg = load_config()
+            filtered = _filter_messages(chat.get("messages", []), cfg)
+            result[cid] = [m for m in filtered if m.get("id", "") in mid_set]
+        except Exception:
+            result[cid] = []
+    return result
+
+
+def upload_unsynced(conversation_id: str | None = None) -> dict[str, Any]:
+    """
+    上传所有未同步记录（或指定会话）。
+    返回 {uploaded, failed, error}
     """
     cfg = load_config()
     if not cfg.get("enabled") or not cfg.get("url", "").strip():
-        return {"uploaded": 0, "skipped": 0, "error": "监控未启用或未配置目标地址"}
+        return {"uploaded": 0, "failed": 0, "error": "监控未启用或未配置目标地址"}
 
-    try:
-        chat_data = load_conversation_chat(conversation_id)
-    except Exception as e:
-        return {"uploaded": 0, "skipped": 0, "error": str(e)}
-
-    all_messages: list[dict[str, Any]] = chat_data.get("messages", [])
-    filtered = _filter_messages(all_messages, cfg)
-
-    with _cache_lock:
-        session_cache = _uploaded_cache.setdefault(conversation_id, {})
-
-    to_upload = []
-    for m in filtered:
-        mid = m.get("id", "")
-        fp = _fingerprint(m)
-        if session_cache.get(mid) != fp:
-            to_upload.append((mid, fp, m))
-
-    if not to_upload:
-        return {"uploaded": 0, "skipped": len(filtered), "error": None}
+    unsynced = get_unsynced(conversation_id=conversation_id, limit=500)
+    if not unsynced:
+        return {"uploaded": 0, "failed": 0, "error": None}
 
     url = cfg["url"].strip()
     headers = {k: str(v) for k, v in (cfg.get("headers") or {}).items()}
     headers.setdefault("Content-Type", "application/json")
     retry = int(cfg.get("retry_times", 3))
-
-    # 构造 payload，附带机器信息
     machine = collect_machine_info()
-    payload = {
-        "conversationId": conversation_id,
-        "timestamp": int(time.time() * 1000),
-        "machine": machine,
-        "messages": [m for _, _, m in to_upload],
+
+    # 读取实际消息内容
+    content_map = _build_message_content(unsynced)
+
+    # 按会话分批上传
+    uploaded_pks: list[str] = []
+    failed_pks: list[str] = []
+
+    # 构建 pk -> row 映射
+    pk_to_row = {r["id"]: r for r in unsynced}
+
+    # 按会话聚合 pk
+    by_conv: dict[str, list[str]] = {}
+    for row in unsynced:
+        by_conv.setdefault(row["conversation_id"], []).append(row["id"])
+
+    for cid, pks in by_conv.items():
+        messages = content_map.get(cid, [])
+        if not messages:
+            # 消息读取失败，跳过（保持未同步）
+            failed_pks.extend(pks)
+            continue
+
+        payload = {
+            "conversationId": cid,
+            "timestamp": int(time.time() * 1000),
+            "machine": machine,
+            "messages": messages,
+        }
+        ok, err_msg = _do_upload(url, headers, payload, retry)
+        if ok:
+            uploaded_pks.extend(pks)
+        else:
+            failed_pks.extend(pks)
+
+    if uploaded_pks:
+        mark_synced(uploaded_pks)
+
+    return {
+        "uploaded": len(uploaded_pks),
+        "failed": len(failed_pks),
+        "error": None if not failed_pks else "部分会话上传失败，请查看错误日志",
     }
 
-    ok = _do_upload(url, headers, payload, retry)
-    if ok:
-        with _cache_lock:
-            for mid, fp, _ in to_upload:
-                _uploaded_cache[conversation_id][mid] = fp
-        return {"uploaded": len(to_upload), "skipped": len(filtered) - len(to_upload), "error": None}
-    else:
-        last_err = _upload_errors[-1]["error"] if _upload_errors else "上传失败"
-        return {"uploaded": 0, "skipped": len(filtered) - len(to_upload), "error": last_err}
+
+# ═══════════════════════════════════════════════════════════════
+# 完整轮询：扫描变化 + 上传未同步
+# ═══════════════════════════════════════════════════════════════
+
+def poll_and_upload() -> dict[str, Any]:
+    """
+    一次完整的监控轮询：
+    1. 扫描所有活跃会话，检测新消息/变化 → 写入 DB（未同步）
+    2. 上传所有未同步记录
+    """
+    cfg = load_config()
+    sessions = load_sessions()
+    active = [s for s in sessions if not s.get("deletedAt")]
+
+    scan_new = 0
+    scan_changed = 0
+    for s in active:
+        cid = s.get("conversationId", "")
+        if not cid:
+            continue
+        diff = _scan_conversation(cid, cfg)
+        scan_new += diff["new"]
+        scan_changed += diff["changed"]
+
+    upload_result = upload_unsynced()
+
+    return {
+        "scanned_sessions": len(active),
+        "scan_new": scan_new,
+        "scan_changed": scan_changed,
+        "uploaded": upload_result["uploaded"],
+        "failed": upload_result["failed"],
+        "error": upload_result.get("error"),
+    }
+
+
+# ═══════════════════════════════════════════════════════════════
+# 辅助
+# ═══════════════════════════════════════════════════════════════
+
+def get_sync_stats() -> dict[str, Any]:
+    return get_stats()
 
 
 def get_upload_errors() -> list[dict[str, Any]]:
-    with _cache_lock:
+    with _errors_lock:
         return list(_upload_errors)
-
-
-def clear_cache(conversation_id: str | None = None) -> None:
-    """清除指纹缓存（可清单个会话或全部）"""
-    with _cache_lock:
-        if conversation_id:
-            _uploaded_cache.pop(conversation_id, None)
-        else:
-            _uploaded_cache.clear()
-
-
-def get_cache_stats() -> dict[str, Any]:
-    """返回缓存统计"""
-    with _cache_lock:
-        return {
-            "sessions": len(_uploaded_cache),
-            "total_messages": sum(len(v) for v in _uploaded_cache.values()),
-        }

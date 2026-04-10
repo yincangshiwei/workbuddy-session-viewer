@@ -10,10 +10,14 @@ from fastapi.staticfiles import StaticFiles
 from app.api.router import api_router
 from app.core.settings import SHARE_BASE
 from app.core.admin_state import set_admin_mode
+from app.core.monitor_db import init_db
 
 # ── 管理员模式：通过环境变量 WORKBUDDY_ADMIN=1 激活 ─────────────
 if os.getenv("WORKBUDDY_ADMIN", "").strip() in ("1", "true", "yes"):
     set_admin_mode(True)
+
+# ── 启动时确保 SQLite DB 和表结构已创建（DB 文件不存在时自动创建）──
+init_db()
 
 # ── FastAPI 应用 ─────────────────────────────────────────────
 app = FastAPI(title="WorkBuddy Session Viewer API")

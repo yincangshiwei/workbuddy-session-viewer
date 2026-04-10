@@ -353,3 +353,16 @@ tr.row-selected:hover td { background: #2c4a67; }
 .admin-machine-row:last-child { border-bottom: none; }
 .admin-machine-label { flex: none; width: 80px; color: #718096; font-size: 11px; }
 .admin-machine-val { color: #e2e8f0; word-break: break-all; }
+
+.admin-step-title { font-size: 13px; font-weight: 600; color: #f6ad55; margin-bottom: 8px; padding-bottom: 6px; border-bottom: 1px solid #2d3748; }
+
+.admin-sync-stats { display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 12px; }
+.admin-sync-stat { display: flex; flex-direction: column; align-items: center; background: #1a202c; border: 1px solid #2d3748; border-radius: 8px; padding: 10px 20px; min-width: 80px; }
+.admin-sync-num { font-size: 22px; font-weight: 700; color: #90cdf4; }
+.admin-sync-stat.c-ok .admin-sync-num { color: #68d391; }
+.admin-sync-stat.c-err .admin-sync-num { color: #fc8181; }
+.admin-sync-lbl { font-size: 11px; color: #718096; margin-top: 2px; }
+
+.admin-init-result { margin: 10px 0; padding: 8px 12px; border-radius: 6px; font-size: 12px; }
+.admin-init-result.ok { background: rgba(104,211,145,0.1); border: 1px solid rgba(104,211,145,0.3); color: #68d391; }
+.admin-init-result.has-error { background: rgba(252,129,129,0.1); border: 1px solid rgba(252,129,129,0.3); color: #fc8181; }

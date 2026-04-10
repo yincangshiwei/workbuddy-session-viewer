@@ -41,6 +41,7 @@ servers/
       settings.py           # 环境变量与路径配置
       admin_state.py        # 管理员模式全局状态
       monitor_config.py     # 监控上传配置持久化（.monitor_config.json）
+      monitor_db.py         # 监控同步状态 SQLite 数据库（monitor_sync.db，启动时自动创建）
 ```
 
 ## 后端（servers）
@@ -114,10 +115,11 @@ WORKBUDDY_ADMIN=1 python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 
 - `GET /api/admin/status`：查询当前是否为管理员模式（所有人可访问，用于前端判断）
 - `GET /api/admin/monitor/config`：获取监控上传配置
 - `POST /api/admin/monitor/config`：保存监控上传配置
-- `POST /api/admin/monitor/upload`：手动触发单个会话的监控上传
-- `POST /api/admin/monitor/upload-batch`：批量触发多个会话的监控上传
-- `GET /api/admin/monitor/cache-stats`：获取已上传消息的指纹缓存统计
-- `POST /api/admin/monitor/clear-cache`：清除指纹缓存（可指定单个会话或全部）
+- `POST /api/admin/monitor/initialize`：初始化同步数据库（清空并重新写入所有活跃会话消息，状态置为未同步）
+- `GET /api/admin/monitor/stats`：获取 DB 中消息的同步状态统计（总数/已同步/未同步/涉及会话数）
+- `GET /api/admin/monitor/messages`：分页查询 DB 中的消息记录（支持按 conversation_id、synced 过滤）
+- `POST /api/admin/monitor/upload`：立即上传所有未同步记录（可指定单个会话）
+- `POST /api/admin/monitor/poll`：执行一次完整轮询（扫描变化 + 上传未同步）
 - `GET /api/admin/monitor/errors`：获取最近上传失败错误日志
 - `GET /api/admin/machine-info`：获取本机环境信息（主机名、域账号、内外网IP、OS等）
 - `POST /api/admin/machine-info/refresh`：强制重新采集机器信息（公网IP变化时使用）
@@ -372,15 +374,43 @@ http://localhost:9877?admin=true
 
 实时监控所有活跃会话的对话内容，检测到新消息或内容变化时自动上传到指定服务器，可用于行为分析等场景。
 
+同步状态通过本地 SQLite 数据库（`servers/monitor_sync.db`）持久化，服务重启后状态不丢失。
+
+**操作流程（三步）：**
+
+```
+第一步：保存配置（协议 / 目标地址 / 数据范围等）
+    ↓
+第二步：执行初始化（⚡ 每次换地址或修改数据范围后必须重新执行）
+    清空 DB 全部记录，重新扫描所有活跃会话，写入消息，状态全部置为「未同步」
+    ↓
+第三步：启动监控（每 10s 自动轮询）
+    扫描会话变化 → 更新 DB → 上传未同步记录 → 标记已同步
+```
+
 **核心特性：**
 
 | 特性 | 说明 |
 |---|---|
-| 首次全量同步 | 每次点击「启动监控」时，会先清除指纹缓存并对所有现有数据执行一次全量同步，确保历史数据不遗漏 |
-| 变化检测 | 对每条消息计算 MD5 指纹（基于 role/text/toolEvents/isComplete），只有内容发生变化才触发上传 |
-| 去重上传 | 已上传且无变化的消息不会重复推送，节省带宽 |
+| SQLite 持久化 | 同步状态写入本地 DB，服务重启后已同步记录不会重复上传 |
+| 变化检测 | 对每条消息计算 MD5 指纹（基于 role/text/toolEvents/isComplete），内容变化时重置为未同步 |
+| 去重上传 | 已同步且无变化的消息不会重复推送 |
+| 初始化重置 | 换服务地址或修改数据范围后，执行初始化可清空 DB 并重新全量同步 |
 | 实时轮询 | 前端每 10 秒自动检测一次，发现变化立即上传 |
 | 失败重试 | 上传失败时按配置次数自动重试，错误日志在页面内实时展示 |
+
+**DB 同步状态字段说明：**
+
+| 字段 | 说明 |
+|---|---|
+| `id` | `conversationId:messageId`（主键） |
+| `conversation_id` | 会话 ID |
+| `message_id` | 消息 ID |
+| `role` | 角色（user / assistant / tool） |
+| `fingerprint` | 消息内容 MD5 指纹 |
+| `synced` | 0 = 未同步，1 = 已同步 |
+| `synced_at` | 同步时间 |
+| `updated_at` | 记录最后更新时间 |
 
 **上传数据范围（可选）：**
 
@@ -432,7 +462,14 @@ http://localhost:9877?admin=true
 | 上传 user 消息 | ✓ | 是否包含用户发送的消息 |
 | 上传 assistant 消息 | 关 | 是否包含 AI 回复内容 |
 
-配置保存在 `servers/.monitor_config.json`，重启后自动恢复。
+**本地文件说明：**
+
+| 文件 | 说明 |
+|---|---|
+| `servers/monitor_sync.db` | 同步状态 SQLite 数据库，服务启动时自动创建，**不提交 Git** |
+| `servers/.monitor_config.json` | 监控上传配置（含服务地址/Token等），**不提交 Git** |
+
+> 两个文件均已加入 `.gitignore`，克隆仓库后首次启动服务会自动创建 `monitor_sync.db` 及表结构。
 
 ---
 
