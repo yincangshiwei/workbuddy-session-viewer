@@ -180,8 +180,10 @@ npm run dev
 
 前端以开发模式启动后，根据后端启动方式访问对应地址：
 
-- 普通模式：`http://localhost:5173`
-- 管理员模式：`http://localhost:5173?admin=true`
+- 普通模式：`http://localhost:5173` 或 `http://<局域网IP>:5173`
+- 管理员模式：`http://localhost:5173?admin=true` 或 `http://<局域网IP>:5173?admin=true`
+
+> Vite 已配置 `host: "0.0.0.0"`，局域网内其他设备可通过 IP 直接访问前端开发服务器。
 
 ## 生产构建与部署模式
 
@@ -363,7 +365,8 @@ http://localhost:9877?admin=true
 |---|---|
 | 主机名 | `socket.gethostname()` 获取 |
 | 域账号 | Windows 下取 `USERDOMAIN\USERNAME`，其他系统取 `USER` |
-| 内网 IP | 枚举本机所有非回环网卡 IP |
+| 主网卡 IP（`local_ip`） | 通过 UDP connect trick 让路由表自动选出出口 IP，天然排除 VMware/VirtualBox/VPN 等虚拟网卡 |
+| 所有本地 IP（`local_ips`） | 枚举本机所有非回环网卡 IP（含虚拟网卡，供参考） |
 | 公网 IP | 依次请求 `ipify` / `ifconfig.me` / `ip.sb` 获取，全部失败则留空 |
 | 操作系统 | 系统名称、发行版本、完整版本号 |
 | 架构 | 处理器架构（如 AMD64） |
@@ -428,7 +431,8 @@ http://localhost:9877?admin=true
   "machine": {
     "hostname": "PC-NAME",
     "domain_user": "DOMAIN\\username",
-    "local_ips": ["192.168.1.100"],
+    "local_ip": "192.168.1.100",
+    "local_ips": ["192.168.1.100", "192.168.154.1", "fe80::..."],
     "public_ip": "1.2.3.4",
     "os": "Windows",
     "os_release": "10",

@@ -22,10 +22,24 @@ init_db()
 # ── FastAPI 应用 ─────────────────────────────────────────────
 app = FastAPI(title="WorkBuddy Session Viewer API")
 
-allow_origins = os.getenv("ALLOW_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173")
+allow_origins = os.getenv(
+    "ALLOW_ORIGINS",
+    "http://localhost:5173,http://127.0.0.1:5173"
+)
+
+def _build_origins(raw: str) -> list[str]:
+    """
+    解析 ALLOW_ORIGINS，支持通配符 *。
+    开发模式下默认允许所有来源（前端 host=0.0.0.0 后局域网 IP 会动态变化）。
+    生产模式（静态托管）同源请求不经过 CORS，无需额外配置。
+    """
+    origins = [x.strip() for x in raw.split(",") if x.strip()]
+    return origins
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[x.strip() for x in allow_origins.split(",") if x.strip()],
+    allow_origins=_build_origins(allow_origins),
+    allow_origin_regex=r"http://(localhost|127\.0\.0\.1|\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}):\d+",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

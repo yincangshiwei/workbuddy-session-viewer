@@ -13,6 +13,7 @@ from app.services.monitor_service import (
     get_upload_errors,
     initialize_sync,
     poll_and_upload,
+    preview_upload_payload,
     refresh_machine_info,
     upload_unsynced,
 )
@@ -49,6 +50,10 @@ class MonitorConfigIn(BaseModel):
     include_assistant: bool = False
     batch_size: int = 50
     retry_times: int = 3
+    # 响应成功判断
+    success_field: str = ""
+    success_value: str = ""
+    success_http_codes: str = ""
 
 
 @router.post("/monitor/config", dependencies=[Depends(require_admin)])
@@ -121,3 +126,16 @@ def get_machine_info():
 @router.post("/machine-info/refresh", dependencies=[Depends(require_admin)])
 def refresh_machine_info_api():
     return refresh_machine_info()
+
+
+# ── 上传 Payload 预览 ─────────────────────────────────────────
+@router.get("/monitor/payload-preview", dependencies=[Depends(require_admin)])
+def get_payload_preview(
+    conversation_id: str = Query(..., description="用于预览的会话ID"),
+    max_messages: int = Query(3, ge=1, le=20, description="最多展示几条消息"),
+):
+    """
+    根据当前配置，构造真实上传 payload 的示例结构（不实际发送）。
+    用于在配置页面展示会上传什么内容给服务端。
+    """
+    return preview_upload_payload(conversation_id, max_messages=max_messages)

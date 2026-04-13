@@ -52,7 +52,55 @@ _machine_lock = threading.Lock()
 # 机器信息采集
 # ═══════════════════════════════════════════════════════════════
 
+# 虚拟/VPN 网段前缀，优先级最低（排除在 local_ip 之外）
+_SKIP_PREFIXES = (
+    "26.",        # ZeroTier / Hamachi
+    "25.",        # Hamachi
+    "100.64.",    # CGNAT / Tailscale
+    "169.254.",   # APIPA 链路本地
+    "172.16.",    "172.17.",    "172.18.",    "172.19.",
+    "172.20.",    "172.21.",    "172.22.",    "172.23.",
+    "172.24.",    "172.25.",    "172.26.",    "172.27.",
+    "172.28.",    "172.29.",    "172.30.",    "172.31.",  # Docker 默认桥接段
+)
+
+# 真实私有网段优先级（越靠前越优先）
+_PREFER_PREFIXES = (
+    "10.",        # 企业内网 / WiFi 常见
+    "192.168.",   # 家庭/办公 WiFi 最常见
+)
+
+
+def _score_ip(ip: str) -> int:
+    """
+    给 IP 打优先级分（分越低越优先）。
+    IPv6 / 虚拟网段 → 高分（靠后）；真实私有 IPv4 → 低分（靠前）。
+    """
+    if ":" in ip:
+        return 100  # IPv6 最低优先
+    for prefix in _SKIP_PREFIXES:
+        if ip.startswith(prefix):
+            return 90  # 虚拟/VPN 网段
+    for i, prefix in enumerate(_PREFER_PREFIXES):
+        if ip.startswith(prefix):
+            return i   # 0 = 最高优先（10.x.x.x），1 = 次之（192.168.x.x）
+    return 50  # 其他公网 IP
+
+
+def _get_primary_local_ip(all_ips: list[str]) -> str:
+    """
+    从已收集的所有 IP 中，按优先级选出最可能是真实物理网卡的 IPv4 地址。
+    优先顺序：10.x.x.x > 192.168.x.x > 其他私有 > 公网 IPv4 > IPv6 > 虚拟网段
+    """
+    candidates = [ip for ip in all_ips if ":" not in ip]  # 只看 IPv4
+    if not candidates:
+        return ""
+    candidates.sort(key=_score_ip)
+    return candidates[0]
+
+
 def _collect_local_ips() -> list[str]:
+    """收集所有本地 IP（含虚拟网卡），过滤回环和 IPv6 链路本地地址"""
     ips: list[str] = []
     try:
         hostname = socket.gethostname()
@@ -62,12 +110,16 @@ def _collect_local_ips() -> list[str]:
                 ips.append(ip)
     except Exception:
         pass
+    # 备用：UDP connect trick
     if not ips:
         try:
             s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.settimeout(2)
             s.connect(("8.8.8.8", 80))
-            ips.append(s.getsockname()[0])
+            ip = s.getsockname()[0]
             s.close()
+            if ip and not ip.startswith("127."):
+                ips.append(ip)
         except Exception:
             pass
     return ips
@@ -109,10 +161,15 @@ def collect_machine_info() -> dict[str, Any]:
         user = os.environ.get("USERNAME", "") or os.environ.get("USER", "")
         domain_user = f"{domain}\\{user}" if domain and domain.upper() != hostname.upper() else user
 
+        # 先收集所有本地 IP，再从中按优先级选出主网卡 IP
+        all_ips = _collect_local_ips()
+        primary_ip = _get_primary_local_ip(all_ips)
+
         _machine_info = {
             "hostname": hostname,
             "domain_user": domain_user,
-            "local_ips": _collect_local_ips(),
+            "local_ip": primary_ip,          # 主网卡 IP（优先选 10.x / 192.168.x，排除虚拟网段）
+            "local_ips": all_ips,            # 所有本地 IP（含虚拟网卡，供参考）
             "public_ip": _fetch_public_ip(),
             "os": platform.system(),
             "os_version": platform.version(),
@@ -305,15 +362,73 @@ def _record_error(url: str, err: str) -> None:
             _upload_errors.pop(0)
 
 
-def _do_upload(url: str, headers: dict[str, str], payload: dict[str, Any], retry: int) -> tuple[bool, str]:
+def _is_success(resp: httpx.Response, cfg: dict[str, Any]) -> tuple[bool, str]:
+    """
+    判断上传是否成功，优先级：
+    1. 若配置了 success_http_codes（如 "200,201"），只认这些状态码
+    2. 若配置了 success_field + success_value，解析响应体 JSON 判断
+    3. 兜底：HTTP 状态码 < 400 视为成功
+    返回 (is_ok, err_reason)
+    """
+    status = resp.status_code
+
+    # ── 方式一：指定状态码列表 ──
+    raw_codes = (cfg.get("success_http_codes") or "").strip()
+    if raw_codes:
+        allowed = {int(c.strip()) for c in raw_codes.split(",") if c.strip().isdigit()}
+        if status not in allowed:
+            return False, f"HTTP {status} 不在成功状态码列表 [{raw_codes}] 中"
+        # 状态码通过后，如果还配了字段判断则继续检查
+        field = (cfg.get("success_field") or "").strip()
+        if not field:
+            return True, ""
+    else:
+        # 未配置状态码列表，先做 < 400 兜底检查
+        if status >= 400:
+            return False, f"HTTP {status}: {resp.text[:200]}"
+        field = (cfg.get("success_field") or "").strip()
+        if not field:
+            return True, ""
+
+    # ── 方式二：解析响应体 JSON 字段 ──
+    expected_raw = (cfg.get("success_value") or "").strip()
+    try:
+        body = resp.json()
+    except Exception:
+        return False, f"响应体非 JSON，无法按字段 '{field}' 判断"
+
+    if not isinstance(body, dict):
+        return False, f"响应体不是 JSON 对象，无法按字段 '{field}' 判断"
+
+    actual = body.get(field)
+    if actual is None:
+        return False, f"响应体中不存在字段 '{field}'"
+
+    # 将实际值转为字符串做宽松比较（兼容 true/True/1/"true"/"1" 等）
+    actual_str = str(actual).lower()
+    expected_str = expected_raw.lower()
+
+    # 特殊处理：true/false 布尔兼容
+    bool_map = {"true": True, "1": True, "false": False, "0": False}
+    actual_norm = bool_map.get(actual_str, actual_str)
+    expected_norm = bool_map.get(expected_str, expected_str)
+
+    if actual_norm == expected_norm:
+        return True, ""
+    return False, f"响应字段 '{field}'={actual!r}，期望值={expected_raw!r}"
+
+
+def _do_upload(url: str, headers: dict[str, str], payload: dict[str, Any], retry: int, cfg: dict[str, Any]) -> tuple[bool, str]:
+    """执行 HTTP POST 上传，失败时重试，根据 cfg 中的成功判断规则决定是否成功"""
     err = "未知错误"
     for attempt in range(max(1, retry)):
         try:
             with httpx.Client(timeout=15) as c:
                 resp = c.post(url, json=payload, headers=headers)
-                if resp.status_code < 400:
-                    return True, ""
-                err = f"HTTP {resp.status_code}: {resp.text[:200]}"
+            ok, reason = _is_success(resp, cfg)
+            if ok:
+                return True, ""
+            err = reason
         except Exception as e:
             err = str(e)
         if attempt < retry - 1:
@@ -397,7 +512,7 @@ def upload_unsynced(conversation_id: str | None = None) -> dict[str, Any]:
             "machine": machine,
             "messages": messages,
         }
-        ok, err_msg = _do_upload(url, headers, payload, retry)
+        ok, err_msg = _do_upload(url, headers, payload, retry, cfg)
         if ok:
             uploaded_pks.extend(pks)
         else:
@@ -460,3 +575,50 @@ def get_sync_stats() -> dict[str, Any]:
 def get_upload_errors() -> list[dict[str, Any]]:
     with _errors_lock:
         return list(_upload_errors)
+
+
+# ═══════════════════════════════════════════════════════════════
+# Payload 预览：构造真实上传结构，不实际发送
+# ═══════════════════════════════════════════════════════════════
+
+def preview_upload_payload(conversation_id: str, max_messages: int = 3) -> dict[str, Any]:
+    """
+    根据当前配置，构造会上传到目标服务器的 payload 示例（不实际发送）。
+    - 按当前配置过滤消息（include_user/include_assistant/include_full 等）
+    - 最多返回 max_messages 条消息作为示例
+    - 包含真实的 machine 信息
+    """
+    cfg = load_config()
+    try:
+        chat = load_conversation_chat(conversation_id)
+    except Exception as e:
+        return {"error": str(e), "payload": None}
+
+    all_messages = chat.get("messages", [])
+    filtered = _filter_messages(all_messages, cfg)
+
+    # 截取前 max_messages 条作为示例
+    sample = filtered[:max_messages]
+    total_filtered = len(filtered)
+
+    machine = collect_machine_info()
+
+    payload = {
+        "conversationId": conversation_id,
+        "timestamp": int(time.time() * 1000),
+        "machine": machine,
+        "messages": sample,
+    }
+
+    return {
+        "error": None,
+        "payload": payload,
+        "total_messages": total_filtered,
+        "sample_count": len(sample),
+        "config_summary": {
+            "include_basic": cfg.get("include_basic", True),
+            "include_full": cfg.get("include_full", False),
+            "include_user": cfg.get("include_user", True),
+            "include_assistant": cfg.get("include_assistant", False),
+        },
+    }

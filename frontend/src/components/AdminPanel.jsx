@@ -18,6 +18,9 @@ const DEFAULT_CFG = {
   include_assistant: false,
   batch_size: 50,
   retry_times: 3,
+  success_field: "",
+  success_value: "",
+  success_http_codes: "",
 };
 
 const STEPS = [
@@ -73,6 +76,160 @@ function useMonitorConfig() {
 
   useEffect(() => { fetchConfig(); }, []);
   return { cfg, setCfg, loading, saving, error, saveOk, saveConfig };
+}
+
+// ── 响应示例输入 + 自动解析字段 ─────────────────────────────
+function ResponseExampleInput({ cfg, setCfg }) {
+  const [raw, setRaw] = useState("");
+  const [parseErr, setParseErr] = useState("");
+  const [parsedKeys, setParsedKeys] = useState([]);
+
+  function handleChange(val) {
+    setRaw(val);
+    setParseErr("");
+    setParsedKeys([]);
+    if (!val.trim()) return;
+    try {
+      const obj = JSON.parse(val);
+      if (typeof obj !== "object" || Array.isArray(obj)) {
+        setParseErr("需要是 JSON 对象格式，如 {\"success\":true}");
+        return;
+      }
+      setParsedKeys(Object.keys(obj));
+    } catch {
+      setParseErr("JSON 格式有误，请检查");
+    }
+  }
+
+  function pickKey(key, obj) {
+    // 自动填入字段名和示例值（转字符串）
+    const val = JSON.parse(raw)[key];
+    setCfg((p) => ({
+      ...p,
+      success_field: key,
+      success_value: String(val),
+    }));
+  }
+
+  return (
+    <div>
+      <textarea
+        className="admin-input admin-textarea"
+        rows={3}
+        placeholder={'{"success":true,"message":"ok"}'}
+        value={raw}
+        onChange={(e) => handleChange(e.target.value)}
+        spellCheck={false}
+      />
+      {parseErr && <div className="admin-hint" style={{ color: "#fc8181", marginTop: 4 }}>{parseErr}</div>}
+      {parsedKeys.length > 0 && (
+        <div className="admin-parsed-keys">
+          <span className="admin-hint">点击字段自动填入：</span>
+          {parsedKeys.map((k) => (
+            <button key={k} className="admin-key-chip" onClick={() => pickKey(k)}>
+              {k}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── 当前生效规则预览 ─────────────────────────────────────────
+function SuccessRulePreview({ cfg }) {
+  const parts = [];
+  if (cfg.success_http_codes.trim()) {
+    parts.push(`HTTP 状态码在 [${cfg.success_http_codes.trim()}] 中`);
+  }
+  if (cfg.success_field.trim() && cfg.success_value.trim()) {
+    parts.push(`响应体字段 "${cfg.success_field}" = ${cfg.success_value}`);
+  }
+  if (parts.length === 0) {
+    parts.push("HTTP 状态码 < 400（默认）");
+  }
+
+  return (
+    <div className="admin-success-preview">
+      <span className="admin-hint">当前判断规则：</span>
+      <span className="admin-success-preview-rule">{parts.join(" 且 ")}</span>
+    </div>
+  );
+}
+
+// ── Payload 预览组件 ─────────────────────────────────────────
+const PREVIEW_CONV_ID = "aaa94cd5c789493db44f390c20aaa634";
+
+function PayloadPreview() {
+  const [preview, setPreview] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [convId, setConvId] = useState(PREVIEW_CONV_ID);
+  const [expanded, setExpanded] = useState(false);
+
+  async function fetchPreview() {
+    setLoading(true);
+    setError("");
+    setPreview(null);
+    try {
+      const r = await fetch(
+        `/api/admin/monitor/payload-preview?conversation_id=${encodeURIComponent(convId)}&max_messages=3`
+      );
+      const d = await r.json();
+      if (!r.ok) throw new Error(d?.detail || "请求失败");
+      if (d.error) throw new Error(d.error);
+      setPreview(d);
+      setExpanded(true);
+    } catch (e) {
+      setError(e.message || "预览失败");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div className="admin-payload-preview-wrap">
+      <div className="admin-payload-preview-header" onClick={() => setExpanded((v) => !v)}>
+        <span className="admin-payload-preview-title">📋 上传内容示例预览</span>
+        <span className="admin-hint">查看按当前配置实际会上传什么内容到服务端</span>
+        <span className="admin-payload-toggle">{expanded ? "▲" : "▼"}</span>
+      </div>
+
+      {expanded && (
+        <div className="admin-payload-preview-body">
+          <div className="admin-payload-conv-row">
+            <input
+              className="admin-input"
+              style={{ flex: 1 }}
+              placeholder="会话ID"
+              value={convId}
+              onChange={(e) => setConvId(e.target.value)}
+            />
+            <button className="btn-primary" onClick={fetchPreview} disabled={loading || !convId.trim()}>
+              {loading ? "加载中..." : "获取示例"}
+            </button>
+          </div>
+
+          {error && <div className="admin-hint" style={{ color: "#fc8181", marginTop: 6 }}>{error}</div>}
+
+          {preview && (
+            <>
+              <div className="admin-payload-meta">
+                按当前配置过滤后共 <strong>{preview.total_messages}</strong> 条消息，
+                展示前 <strong>{preview.sample_count}</strong> 条
+                （{preview.config_summary.include_full ? "完整对话" : "基础对话"}
+                {preview.config_summary.include_user ? " · user" : ""}
+                {preview.config_summary.include_assistant ? " · assistant" : ""}）
+              </div>
+              <pre className="admin-payload-json">
+                {JSON.stringify(preview.payload, null, 2)}
+              </pre>
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
 }
 
 // ── 主组件 ───────────────────────────────────────────────────
@@ -234,13 +391,14 @@ export default function AdminPanel() {
             ) : machineInfo ? (
               <div className="admin-machine-grid">
                 {[
-                  ["主机名",   machineInfo.hostname],
-                  ["域账号",   machineInfo.domain_user],
-                  ["内网 IP",  (machineInfo.local_ips || []).join("，") || "-"],
-                  ["公网 IP",  machineInfo.public_ip || "获取失败"],
-                  ["操作系统", `${machineInfo.os} ${machineInfo.os_release}`],
-                  ["OS 版本",  machineInfo.os_version],
-                  ["架构",     machineInfo.machine],
+                  ["主机名",      machineInfo.hostname],
+                  ["域账号",      machineInfo.domain_user],
+                  ["主网卡 IP",   machineInfo.local_ip || "获取失败"],
+                  ["所有本地 IP", (machineInfo.local_ips || []).join("  /  ") || "-"],
+                  ["公网 IP",     machineInfo.public_ip || "获取失败"],
+                  ["操作系统",    `${machineInfo.os} ${machineInfo.os_release}`],
+                  ["OS 版本",     machineInfo.os_version],
+                  ["架构",        machineInfo.machine],
                   ["采集时间", machineInfo.collected_at],
                 ].map(([label, val]) => (
                   <div className="admin-machine-row" key={label}>
@@ -346,6 +504,72 @@ export default function AdminPanel() {
                 <button className="btn-outline admin-btn-sm"
                   onClick={() => setHeaderRows((p) => [...p, { key: "", value: "" }])}>+ 添加请求头</button>
               </div>
+
+              {/* ── 响应成功判断 ── */}
+              <div className="admin-config-row full">
+                <div className="admin-label-text">响应成功判断</div>
+                <div className="admin-success-judge-box">
+                  <div className="admin-success-judge-desc">
+                    填写服务响应示例，系统自动解析字段名用于判断请求是否成功。未配置时默认以 HTTP 状态码 &lt;400 为成功。
+                  </div>
+
+                  {/* 响应示例输入 */}
+                  <div className="admin-success-example-row">
+                    <div className="admin-label-text" style={{ marginBottom: 6 }}>
+                      响应示例 JSON
+                      <span className="admin-hint" style={{ marginLeft: 8 }}>
+                        如 {`{"success":true}`} 或 {`{"code":0,"message":"ok"}`}
+                      </span>
+                    </div>
+                    <ResponseExampleInput cfg={cfg} setCfg={setCfg} />
+                  </div>
+
+                  {/* 字段 + 期望值 */}
+                  <div className="admin-success-field-row">
+                    <div style={{ flex: 1 }}>
+                      <div className="admin-label-text" style={{ marginBottom: 4 }}>判断字段名</div>
+                      <input
+                        className="admin-input"
+                        placeholder='如 success 或 code'
+                        value={cfg.success_field}
+                        onChange={(e) => setCfg((p) => ({ ...p, success_field: e.target.value }))}
+                      />
+                    </div>
+                    <div className="admin-success-eq">=</div>
+                    <div style={{ flex: 1 }}>
+                      <div className="admin-label-text" style={{ marginBottom: 4 }}>成功时的值</div>
+                      <input
+                        className="admin-input"
+                        placeholder='如 true 或 0'
+                        value={cfg.success_value}
+                        onChange={(e) => setCfg((p) => ({ ...p, success_value: e.target.value }))}
+                      />
+                    </div>
+                  </div>
+
+                  {/* 分隔 */}
+                  <div className="admin-success-or">
+                    <span>或</span>
+                  </div>
+
+                  {/* 状态码 */}
+                  <div>
+                    <div className="admin-label-text" style={{ marginBottom: 4 }}>
+                      指定成功 HTTP 状态码
+                      <span className="admin-hint" style={{ marginLeft: 8 }}>逗号分隔，如 200,201；为空则 &lt;400 即成功</span>
+                    </div>
+                    <input
+                      className="admin-input"
+                      placeholder="200,201"
+                      value={cfg.success_http_codes}
+                      onChange={(e) => setCfg((p) => ({ ...p, success_http_codes: e.target.value }))}
+                    />
+                  </div>
+
+                  {/* 当前生效规则预览 */}
+                  <SuccessRulePreview cfg={cfg} />
+                </div>
+              </div>
             </div>
 
             <div className="admin-actions" style={{ marginTop: 16 }}>
@@ -358,6 +582,9 @@ export default function AdminPanel() {
                 </button>
               )}
             </div>
+
+            {/* ── Payload 预览 ── */}
+            <PayloadPreview />
           </div>
         );
 

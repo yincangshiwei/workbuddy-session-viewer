@@ -20,6 +20,12 @@ _DEFAULT_CONFIG: dict[str, Any] = {
     "include_assistant": False,  # 包含 assistant 角色消息（默认不包含）
     "batch_size": 50,            # 每批最多消息数
     "retry_times": 3,            # 失败重试次数
+    # ── 响应成功判断 ──────────────────────────────────────────
+    # 方式一：按响应体 JSON 字段判断
+    "success_field": "",         # 判断字段名，如 "success" 或 "code"
+    "success_value": "",         # 成功时该字段的值，如 "true" 或 "0"（字符串形式）
+    # 方式二：按 HTTP 状态码判断（逗号分隔，如 "200,201"；为空则 <400 即视为成功）
+    "success_http_codes": "",
 }
 
 

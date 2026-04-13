@@ -365,7 +365,7 @@ tr.row-selected:hover td { background: #2c4a67; }
 .admin-machine-grid { display: flex; flex-direction: column; gap: 0; margin-bottom: 4px; }
 .admin-machine-row { display: flex; gap: 12px; align-items: baseline; font-size: 12px; padding: 7px 0; border-bottom: 1px solid #2d3748; }
 .admin-machine-row:last-child { border-bottom: none; }
-.admin-machine-label { flex: none; width: 80px; color: #718096; font-size: 11px; }
+.admin-machine-label { flex: none; width: 90px; color: #718096; font-size: 11px; }
 .admin-machine-val { color: #e2e8f0; word-break: break-all; }
 
 .admin-sync-stats { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
@@ -391,3 +391,30 @@ tr.row-selected:hover td { background: #2c4a67; }
 .admin-error-list { margin-top: 12px; padding: 10px 12px; background: rgba(252,129,129,0.05); border: 1px solid rgba(252,129,129,0.25); border-radius: 6px; }
 .admin-error-item { display: flex; gap: 10px; margin-bottom: 4px; font-size: 11px; }
 .admin-error-item .admin-log-msg { color: #fc8181; }
+
+/* 响应成功判断 */
+.admin-success-judge-box { background: #1a202c; border: 1px solid #2d3748; border-radius: 8px; padding: 14px; display: flex; flex-direction: column; gap: 12px; }
+.admin-success-judge-desc { font-size: 11px; color: #718096; line-height: 1.6; }
+.admin-success-example-row { display: flex; flex-direction: column; gap: 4px; }
+.admin-textarea { resize: vertical; min-height: 60px; font-family: "Consolas", "Courier New", monospace; font-size: 12px; line-height: 1.5; }
+.admin-parsed-keys { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
+.admin-key-chip { background: #2d3748; border: 1px solid #4a5568; color: #90cdf4; padding: 2px 10px; border-radius: 999px; font-size: 11px; cursor: pointer; transition: background .15s; }
+.admin-key-chip:hover { background: #2b6cb0; border-color: #2b6cb0; color: #fff; }
+.admin-success-field-row { display: flex; align-items: flex-end; gap: 10px; }
+.admin-success-eq { font-size: 16px; color: #718096; padding-bottom: 8px; flex: none; }
+.admin-success-or { display: flex; align-items: center; gap: 8px; color: #4a5568; font-size: 11px; }
+.admin-success-or::before, .admin-success-or::after { content: ""; flex: 1; height: 1px; background: #2d3748; }
+.admin-success-preview { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 6px 10px; background: #0d1117; border-radius: 6px; font-size: 11px; }
+.admin-success-preview-rule { color: #63b3ed; font-family: "Consolas", "Courier New", monospace; }
+
+/* Payload 预览 */
+.admin-payload-preview-wrap { margin-top: 20px; border: 1px solid #2d3748; border-radius: 8px; overflow: hidden; }
+.admin-payload-preview-header { display: flex; align-items: center; gap: 10px; padding: 10px 14px; background: #1a202c; cursor: pointer; user-select: none; }
+.admin-payload-preview-header:hover { background: #242d3d; }
+.admin-payload-preview-title { font-size: 13px; font-weight: 600; color: #90cdf4; }
+.admin-payload-toggle { margin-left: auto; color: #718096; font-size: 11px; flex: none; }
+.admin-payload-preview-body { padding: 14px; background: #1a202c; border-top: 1px solid #2d3748; display: flex; flex-direction: column; gap: 10px; }
+.admin-payload-conv-row { display: flex; gap: 8px; align-items: center; }
+.admin-payload-meta { font-size: 12px; color: #718096; }
+.admin-payload-meta strong { color: #e2e8f0; }
+.admin-payload-json { background: #0d1117; border: 1px solid #2d3748; border-radius: 6px; padding: 12px; font-family: "Consolas", "Courier New", monospace; font-size: 11px; color: #a0aec0; line-height: 1.6; overflow-x: auto; max-height: 480px; overflow-y: auto; white-space: pre; }
