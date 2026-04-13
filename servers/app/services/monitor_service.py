@@ -43,6 +43,59 @@ _upload_errors: list[dict[str, Any]] = []
 _errors_lock = threading.Lock()
 _MAX_ERRORS = 100
 
+# ── 轮询取消标志 ───────────────────────────────────────────────
+_cancel_event = threading.Event()
+
+
+def request_cancel() -> None:
+    """请求取消当前正在执行的轮询/上传"""
+    _cancel_event.set()
+
+
+def _is_cancelled() -> bool:
+    return _cancel_event.is_set()
+
+
+# ── 实时日志缓冲区（前端独立拉取）────────────────────────────
+_live_logs: list[dict[str, Any]] = []   # [{id, msg, type, ts}]
+_live_logs_lock = threading.Lock()
+_live_log_counter = 0
+
+
+def _push_log(msg: str, log_type: str = "info") -> None:
+    """向实时日志缓冲区追加一条日志"""
+    global _live_log_counter
+    with _live_logs_lock:
+        _live_log_counter += 1
+        _live_logs.append({
+            "id": _live_log_counter,
+            "msg": msg,
+            "type": log_type,
+            "ts": time.strftime("%H:%M:%S"),
+        })
+        # 最多保留 500 条
+        if len(_live_logs) > 500:
+            _live_logs[:] = _live_logs[-500:]
+
+
+def get_live_logs(since_id: int = 0) -> dict[str, Any]:
+    """获取 since_id 之后的所有日志条目"""
+    with _live_logs_lock:
+        if since_id <= 0:
+            entries = list(_live_logs)
+        else:
+            entries = [e for e in _live_logs if e["id"] > since_id]
+        return {"logs": entries}
+
+
+def clear_live_logs() -> None:
+    """清空实时日志缓冲区"""
+    global _live_log_counter
+    with _live_logs_lock:
+        _live_logs.clear()
+        _live_log_counter = 0
+
+
 # ── 机器信息缓存 ───────────────────────────────────────────────
 _machine_info: dict[str, Any] | None = None
 _machine_lock = threading.Lock()
@@ -465,6 +518,78 @@ def _build_message_content(unsynced_rows: list[dict[str, Any]]) -> dict[str, lis
     return result
 
 
+def _upload_unsynced_with_logs() -> dict[str, Any]:
+    """与 upload_unsynced 逻辑相同，但将每步进度实时推送到日志缓冲区。"""
+    cfg = load_config()
+    if not cfg.get("enabled") or not cfg.get("url", "").strip():
+        _push_log("监控未启用或未配置目标地址，跳过上传", "info")
+        return {"uploaded": 0, "failed": 0, "error": "监控未启用或未配置目标地址"}
+
+    unsynced = get_unsynced(limit=500)
+    if not unsynced:
+        _push_log("无待上传记录", "info")
+        return {"uploaded": 0, "failed": 0, "error": None}
+
+    # 按会话聚合
+    by_conv: dict[str, list[str]] = {}
+    for row in unsynced:
+        by_conv.setdefault(row["conversation_id"], []).append(row["id"])
+
+    _push_log(f"开始上传：{len(unsynced)} 条未同步记录（{len(by_conv)} 个会话）", "info")
+
+    url = cfg["url"].strip()
+    headers = {k: str(v) for k, v in (cfg.get("headers") or {}).items()}
+    headers.setdefault("Content-Type", "application/json")
+    retry = int(cfg.get("retry_times", 3))
+    machine = collect_machine_info()
+    content_map = _build_message_content(unsynced)
+
+    uploaded_pks: list[str] = []
+    failed_pks: list[str] = []
+    conv_idx = 0
+
+    for cid, pks in by_conv.items():
+        if _is_cancelled():
+            _push_log(f"上传阶段被取消（已处理 {conv_idx}/{len(by_conv)}）", "info")
+            break
+        conv_idx += 1
+        short_id = cid[:12]
+        messages = content_map.get(cid, [])
+        if not messages:
+            failed_pks.extend(pks)
+            _push_log(f"上传 [{short_id}]：消息读取失败，跳过（{len(pks)} 条）", "error")
+            continue
+
+        payload = {
+            "conversationId": cid,
+            "timestamp": int(time.time() * 1000),
+            "machine": machine,
+            "messages": messages,
+        }
+        ok, err_msg = _do_upload(url, headers, payload, retry, cfg)
+        if ok:
+            uploaded_pks.extend(pks)
+            _push_log(f"上传 [{short_id}]：成功（{len(messages)} 条消息）[{conv_idx}/{len(by_conv)}]", "success")
+        else:
+            failed_pks.extend(pks)
+            _push_log(f"上传 [{short_id}]：失败 - {err_msg}（{len(messages)} 条消息）", "error")
+
+    if uploaded_pks:
+        mark_synced(uploaded_pks)
+
+    if uploaded_pks or failed_pks:
+        _push_log(
+            f"上传完成：成功 {len(uploaded_pks)} 条，失败 {len(failed_pks)} 条",
+            "success" if not failed_pks else "error",
+        )
+
+    return {
+        "uploaded": len(uploaded_pks),
+        "failed": len(failed_pks),
+        "error": None if not failed_pks else "部分会话上传失败，请查看错误日志",
+    }
+
+
 def upload_unsynced(conversation_id: str | None = None) -> dict[str, Any]:
     """
     上传所有未同步记录（或指定会话）。
@@ -500,6 +625,8 @@ def upload_unsynced(conversation_id: str | None = None) -> dict[str, Any]:
         by_conv.setdefault(row["conversation_id"], []).append(row["id"])
 
     for cid, pks in by_conv.items():
+        if _is_cancelled():
+            break
         messages = content_map.get(cid, [])
         if not messages:
             # 消息读取失败，跳过（保持未同步）
@@ -537,24 +664,57 @@ def poll_and_upload() -> dict[str, Any]:
     一次完整的监控轮询：
     1. 扫描所有活跃会话，检测新消息/变化 → 写入 DB（未同步）
     2. 上传所有未同步记录
+    支持通过 request_cancel() 中途取消。
+    日志实时推送到共享缓冲区，前端通过 GET /monitor/live-logs 拉取。
     """
+    _cancel_event.clear()
+
     cfg = load_config()
     sessions = load_sessions()
     active = [s for s in sessions if not s.get("deletedAt")]
 
+    _push_log(f"开始扫描 {len(active)} 个活跃会话...", "info")
+
     scan_new = 0
     scan_changed = 0
+    scanned_count = 0
+    cancelled = False
     for s in active:
+        if _is_cancelled():
+            cancelled = True
+            _push_log(f"扫描阶段被取消（已完成 {scanned_count}/{len(active)}）", "info")
+            break
         cid = s.get("conversationId", "")
         if not cid:
             continue
+        title = s.get("title", "") or cid[:12]
         diff = _scan_conversation(cid, cfg)
-        scan_new += diff["new"]
-        scan_changed += diff["changed"]
+        scanned_count += 1
+        n, c = diff["new"], diff["changed"]
+        scan_new += n
+        scan_changed += c
+        if n or c:
+            parts = []
+            if n:
+                parts.append(f"{n} 条新消息")
+            if c:
+                parts.append(f"{c} 条变化")
+            _push_log(f"扫描 [{title}]：{'、'.join(parts)}", "success")
 
-    upload_result = upload_unsynced()
+    if not cancelled:
+        _push_log(
+            f"扫描完成：共 {scanned_count} 个会话，{scan_new} 条新消息、{scan_changed} 条变化",
+            "success" if (scan_new or scan_changed) else "info",
+        )
+
+    if not cancelled and not _is_cancelled():
+        upload_result = _upload_unsynced_with_logs()
+    else:
+        cancelled = True
+        upload_result = {"uploaded": 0, "failed": 0, "error": None}
 
     return {
+        "cancelled": cancelled,
         "scanned_sessions": len(active),
         "scan_new": scan_new,
         "scan_changed": scan_changed,

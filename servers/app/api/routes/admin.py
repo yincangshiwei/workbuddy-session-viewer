@@ -8,13 +8,16 @@ from app.core.admin_state import is_admin_mode
 from app.core.monitor_config import load_config, save_config
 from app.core.monitor_db import get_messages_page
 from app.services.monitor_service import (
+    clear_live_logs,
     collect_machine_info,
+    get_live_logs,
     get_sync_stats,
     get_upload_errors,
     initialize_sync,
     poll_and_upload,
     preview_upload_payload,
     refresh_machine_info,
+    request_cancel,
     upload_unsynced,
 )
 
@@ -111,10 +114,32 @@ def trigger_poll():
     return poll_and_upload()
 
 
+# ── 停止正在执行的轮询/上传 ───────────────────────────────────
+@router.post("/monitor/stop", dependencies=[Depends(require_admin)])
+def stop_poll():
+    """请求取消当前正在执行的轮询或上传操作"""
+    request_cancel()
+    return {"success": True}
+
+
 # ── 上传错误日志 ──────────────────────────────────────────────
 @router.get("/monitor/errors", dependencies=[Depends(require_admin)])
 def get_monitor_errors():
     return {"errors": get_upload_errors()}
+
+
+# ── 实时日志（前端轮询拉取）──────────────────────────────────
+@router.get("/monitor/live-logs", dependencies=[Depends(require_admin)])
+def get_monitor_live_logs(since: int = Query(0, description="只返回 id > since 的日志")):
+    """拉取后端实时推送的监控日志（增量查询）"""
+    return get_live_logs(since_id=since)
+
+
+@router.post("/monitor/live-logs/clear", dependencies=[Depends(require_admin)])
+def clear_monitor_live_logs():
+    """清空实时日志缓冲区"""
+    clear_live_logs()
+    return {"success": True}
 
 
 # ── 本机环境信息 ──────────────────────────────────────────────

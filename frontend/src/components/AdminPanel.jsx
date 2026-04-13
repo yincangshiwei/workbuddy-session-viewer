@@ -302,11 +302,38 @@ export default function AdminPanel() {
   const monitorTimer = useRef(null);
   const abortCtrlRef = useRef(null); // 当前 poll 的 AbortController
   const logRef = useRef(null);
+  const liveLogTimer = useRef(null);  // 实时日志轮询定时器
+  const liveLogSinceRef = useRef(0);  // 上次拉取的日志 id
 
   const addLog = useCallback((msg, type = "info") => {
     const ts = new Date().toLocaleTimeString();
     setMonitorLog((prev) => [...prev, { ts, msg, type }].slice(-300));
   }, []);
+
+  // 拉取后端实时日志（增量）
+  async function pullLiveLogs() {
+    try {
+      const r = await fetch(`/api/admin/monitor/live-logs?since=${liveLogSinceRef.current}`);
+      if (!r.ok) return;
+      const d = await r.json();
+      if (d.logs && d.logs.length > 0) {
+        d.logs.forEach((entry) => {
+          addLog(entry.msg, entry.type || "info");
+          liveLogSinceRef.current = entry.id;
+        });
+      }
+    } catch (_) {}
+  }
+
+  // 启动实时日志轮询（每 1 秒拉取一次）
+  function startLiveLogPolling() {
+    stopLiveLogPolling();
+    liveLogTimer.current = setInterval(pullLiveLogs, 1000);
+  }
+
+  function stopLiveLogPolling() {
+    if (liveLogTimer.current) { clearInterval(liveLogTimer.current); liveLogTimer.current = null; }
+  }
 
   async function runPoll() {
     // 每次 poll 创建新的 AbortController，取消上一次未完成的请求
@@ -319,21 +346,19 @@ export default function AdminPanel() {
       const r = await fetch("/api/admin/monitor/poll", { method: "POST", signal });
       if (!r.ok) throw new Error(`轮询请求失败: ${r.status}`);
       const d = await r.json();
-      const scanMsg = (d.scan_new || d.scan_changed)
-        ? `发现 ${d.scan_new} 条新消息、${d.scan_changed} 条变化`
-        : "无新变化";
-      const uploadMsg = d.uploaded > 0 ? `上传 ${d.uploaded} 条`
-        : d.failed > 0 ? `上传失败 ${d.failed} 条` : "无待上传";
-      const type = d.failed > 0 ? "error"
-        : (d.uploaded > 0 || d.scan_new > 0 || d.scan_changed > 0) ? "success" : "info";
-      addLog(`${scanMsg}，${uploadMsg}（扫描 ${d.scanned_sessions} 个会话）`, type);
 
-      if (signal.aborted) return; // 已停止，不继续后续副作用
+      if (d.cancelled) {
+        addLog("本次轮询已被取消", "info");
+      }
+
+      if (signal.aborted) return;
+      // poll 结束后再拉一次日志确保不遗漏
+      await pullLiveLogs();
       fetchStats();
       const errR = await fetch("/api/admin/monitor/errors", { signal });
       if (errR.ok) setUploadErrors((await errR.json()).errors || []);
     } catch (e) {
-      if (e.name === "AbortError") return; // 主动取消，不记录错误
+      if (e.name === "AbortError") return;
       addLog(`轮询错误: ${e.message}`, "error");
     }
   }
@@ -341,7 +366,11 @@ export default function AdminPanel() {
   function startMonitor() {
     if (monitorRunning) return;
     setMonitorRunning(true);
+    // 清空后端日志缓冲区，重置游标
+    fetch("/api/admin/monitor/live-logs/clear", { method: "POST" }).catch(() => {});
+    liveLogSinceRef.current = 0;
     addLog("监控已启动，开始第一次轮询...", "success");
+    startLiveLogPolling();
     runPoll();
     monitorTimer.current = setInterval(runPoll, POLL_INTERVAL * 1000);
   }
@@ -351,6 +380,10 @@ export default function AdminPanel() {
     if (monitorTimer.current) { clearInterval(monitorTimer.current); monitorTimer.current = null; }
     // 取消正在进行中的 fetch 请求
     if (abortCtrlRef.current) { abortCtrlRef.current.abort(); abortCtrlRef.current = null; }
+    // 通知后端取消正在执行的轮询/上传
+    fetch("/api/admin/monitor/stop", { method: "POST" }).catch(() => {});
+    // 停止前最后拉一次日志
+    pullLiveLogs().finally(() => stopLiveLogPolling());
     setMonitorRunning(false);
     addLog("监控已停止", "info");
   }
@@ -358,6 +391,7 @@ export default function AdminPanel() {
   useEffect(() => () => {
     if (monitorTimer.current) clearInterval(monitorTimer.current);
     if (abortCtrlRef.current) abortCtrlRef.current.abort();
+    stopLiveLogPolling();
   }, []);
   useEffect(() => {
     if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
