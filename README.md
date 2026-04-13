@@ -40,7 +40,7 @@ servers/
     core/
       settings.py           # 环境变量与路径配置
       admin_state.py        # 管理员模式全局状态
-      monitor_config.py     # 监控上传配置持久化（.monitor_config.json）
+      monitor_config.py     # 监控服务配置持久化（.monitor_config.json）
       monitor_db.py         # 监控同步状态 SQLite 数据库（monitor_sync.db，启动时自动创建）
 ```
 
@@ -113,8 +113,8 @@ WORKBUDDY_ADMIN=1 python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 
 ### 管理员模式接口（需以管理员模式启动）
 
 - `GET /api/admin/status`：查询当前是否为管理员模式（所有人可访问，用于前端判断）
-- `GET /api/admin/monitor/config`：获取监控上传配置
-- `POST /api/admin/monitor/config`：保存监控上传配置
+- `GET /api/admin/monitor/config`：获取监控服务配置
+- `POST /api/admin/monitor/config`：保存监控服务配置
 - `POST /api/admin/monitor/initialize`：初始化同步数据库（清空并重新写入所有活跃会话消息，状态置为未同步）
 - `GET /api/admin/monitor/stats`：获取 DB 中消息的同步状态统计（总数/已同步/未同步/涉及会话数）
 - `GET /api/admin/monitor/messages`：分页查询 DB 中的消息记录（支持按 conversation_id、synced 过滤）
@@ -382,7 +382,7 @@ http://localhost:9877?admin=true
 **操作流程（三步）：**
 
 ```
-第一步：保存配置（协议 / 目标地址 / 数据范围等）
+第一步：保存配置（协议 / 服务地址 / 数据范围等）
     ↓
 第二步：执行初始化（⚡ 每次换地址或修改数据范围后必须重新执行）
     清空 DB 全部记录，重新扫描所有活跃会话，写入消息，状态全部置为「未同步」
@@ -426,6 +426,8 @@ http://localhost:9877?admin=true
 
 ```json
 {
+  "platform": "WorkBuddy",
+  "union_id": "获取到的 union_id",
   "conversationId": "xxx",
   "timestamp": 1712345678000,
   "machine": {
@@ -460,8 +462,10 @@ http://localhost:9877?admin=true
 |---|---|---|
 | 启用监控上传 | 关 | 总开关，关闭时不会进行任何上传 |
 | 上传协议 | HTTPS | HTTP 或 HTTPS |
-| 目标上传地址 | 空 | 接收数据的服务器 URL |
-| 自定义请求头 | 空 | 可添加鉴权 Token 等 Header |
+| 获取 union_id 地址 | 空 | 必填，GET 请求，获取用于绑定的 union_id |
+| 上传数据地址 | 空 | 必填，POST 请求，接收消息数据的服务器 URL |
+| 删除数据地址 | 空 | POST 请求，用于请求服务端删除当前绑定的数据 |
+| 自定义参数 | 空 | 可添加鉴权 Token (Header) 或自定义字段 (Body) |
 | 失败重试次数 | 3 | 上传失败后的重试次数（1-10） |
 | 上传 user 消息 | ✓ | 是否包含用户发送的消息 |
 | 上传 assistant 消息 | 关 | 是否包含 AI 回复内容 |
@@ -471,7 +475,7 @@ http://localhost:9877?admin=true
 | 文件 | 说明 |
 |---|---|
 | `servers/monitor_sync.db` | 同步状态 SQLite 数据库，服务启动时自动创建，**不提交 Git** |
-| `servers/.monitor_config.json` | 监控上传配置（含服务地址/Token等），**不提交 Git** |
+| `servers/.monitor_config.json` | 监控服务配置（含服务地址等），**不提交 Git** |
 
 > 两个文件均已加入 `.gitignore`，克隆仓库后首次启动服务会自动创建 `monitor_sync.db` 及表结构。
 
