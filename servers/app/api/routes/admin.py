@@ -10,6 +10,8 @@ from app.core.monitor_db import get_messages_page
 from app.services.monitor_service import (
     clear_live_logs,
     collect_machine_info,
+    fetch_union_id,
+    delete_remote_data,
     get_live_logs,
     get_sync_stats,
     get_upload_errors,
@@ -42,21 +44,41 @@ def get_monitor_config():
     return load_config()
 
 
+class CustomParamItem(BaseModel):
+    key: str = ""
+    value: str = ""
+    desc: str = ""
+    type: str = "header"   # "header" | "body"
+
+
+class SuccessRuleItem(BaseModel):
+    enabled: bool = True
+    field: str = ""
+    op: str = "eq"   # eq | ne | gt | gte | lt | lte | contains | not_contains
+    value: str = ""
+
+
 class MonitorConfigIn(BaseModel):
     enabled: bool = False
     protocol: str = "https"
     url: str = ""
-    headers: dict[str, str] = {}
+    union_id_url: str = ""
+    delete_url: str = ""
+    union_id: str = ""
+    platform_value: str = "WorkBuddy"
+    custom_params: list[CustomParamItem] = []
     include_basic: bool = True
     include_full: bool = False
     include_user: bool = True
     include_assistant: bool = False
     batch_size: int = 50
     retry_times: int = 3
-    # 响应成功判断
+    # 响应成功判断（旧版保留兼容）
     success_field: str = ""
     success_value: str = ""
     success_http_codes: str = ""
+    # 新版多规则
+    success_rules: list[SuccessRuleItem] = []
 
 
 @router.post("/monitor/config", dependencies=[Depends(require_admin)])
@@ -164,3 +186,28 @@ def get_payload_preview(
     用于在配置页面展示会上传什么内容给服务端。
     """
     return preview_upload_payload(conversation_id, max_messages=max_messages)
+
+
+# ── 获取 union_id ─────────────────────────────────────────────
+@router.get("/monitor/union-id", dependencies=[Depends(require_admin)])
+def get_union_id_api(
+    platform: str = Query(..., description="平台标识"),
+    url: str = Query("", description="获取 union_id 的地址，为空时从已保存配置读取"),
+):
+    """通过指定地址（或已保存配置的 union_id_url）发送 GET 请求获取 union_id"""
+    return fetch_union_id(platform=platform, url=url or None)
+
+
+
+# ── 删除远端数据 ──────────────────────────────────────────────
+class DeleteDataIn(BaseModel):
+    platform: str
+    union_id: str
+    url: str = ""   # 为空时从已保存配置读取
+
+
+@router.post("/monitor/delete-data", dependencies=[Depends(require_admin)])
+def delete_data_api(body: DeleteDataIn):
+    """通过指定地址（或已保存配置的 delete_url）发送 POST 请求删除远端数据"""
+    return delete_remote_data(platform=body.platform, union_id=body.union_id, url=body.url or None)
+

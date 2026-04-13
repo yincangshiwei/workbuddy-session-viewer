@@ -415,63 +415,136 @@ def _record_error(url: str, err: str) -> None:
             _upload_errors.pop(0)
 
 
+def _coerce(actual: Any, expected_str: str) -> tuple[Any, Any]:
+    """尝试将 expected_str 转换为与 actual 相同的类型，便于数值比较"""
+    bool_map = {"true": True, "1": True, "false": False, "0": False}
+    if isinstance(actual, bool):
+        return actual, bool_map.get(expected_str.lower(), expected_str.lower() == "true")
+    if isinstance(actual, (int, float)):
+        try:
+            return actual, type(actual)(expected_str)
+        except (ValueError, TypeError):
+            return actual, expected_str
+    return str(actual), expected_str
+
+
+def _apply_op(actual: Any, op: str, expected_str: str) -> tuple[bool, str]:
+    """对单条规则执行比较运算，返回 (passed, reason)"""
+    a, e = _coerce(actual, expected_str)
+    try:
+        if op == "eq":
+            ok = (str(a).lower() == str(e).lower()) if isinstance(a, bool) else (a == e)
+        elif op == "ne":
+            ok = (str(a).lower() != str(e).lower()) if isinstance(a, bool) else (a != e)
+        elif op == "gt":
+            ok = a > e
+        elif op == "gte":
+            ok = a >= e
+        elif op == "lt":
+            ok = a < e
+        elif op == "lte":
+            ok = a <= e
+        elif op == "contains":
+            ok = str(e) in str(a)
+        elif op == "not_contains":
+            ok = str(e) not in str(a)
+        else:
+            return False, f"未知运算符 '{op}'"
+    except TypeError as ex:
+        return False, f"类型不兼容无法比较：{ex}"
+    if ok:
+        return True, ""
+    op_labels = {"eq": "=", "ne": "≠", "gt": ">", "gte": "≥", "lt": "<", "lte": "≤",
+                 "contains": "包含", "not_contains": "不包含"}
+    label = op_labels.get(op, op)
+    return False, f"字段 '{actual!r}' {label} '{expected_str}' 不满足"
+
+
 def _is_success(resp: httpx.Response, cfg: dict[str, Any]) -> tuple[bool, str]:
     """
-    判断上传是否成功，优先级：
-    1. 若配置了 success_http_codes（如 "200,201"），只认这些状态码
-    2. 若配置了 success_field + success_value，解析响应体 JSON 判断
-    3. 兜底：HTTP 状态码 < 400 视为成功
-    返回 (is_ok, err_reason)
+    判断上传是否成功：
+    1. HTTP 状态码检查（success_http_codes 或 < 400 兜底）
+    2. 新版多规则（success_rules，所有启用的规则必须全部通过）
+    3. 旧版单字段兼容（success_field + success_value）
     """
     status = resp.status_code
 
-    # ── 方式一：指定状态码列表 ──
+    # ── HTTP 状态码检查 ──
     raw_codes = (cfg.get("success_http_codes") or "").strip()
     if raw_codes:
         allowed = {int(c.strip()) for c in raw_codes.split(",") if c.strip().isdigit()}
         if status not in allowed:
             return False, f"HTTP {status} 不在成功状态码列表 [{raw_codes}] 中"
-        # 状态码通过后，如果还配了字段判断则继续检查
-        field = (cfg.get("success_field") or "").strip()
-        if not field:
-            return True, ""
     else:
-        # 未配置状态码列表，先做 < 400 兜底检查
         if status >= 400:
             return False, f"HTTP {status}: {resp.text[:200]}"
-        field = (cfg.get("success_field") or "").strip()
-        if not field:
-            return True, ""
 
-    # ── 方式二：解析响应体 JSON 字段 ──
-    expected_raw = (cfg.get("success_value") or "").strip()
+    # ── 解析响应体（多规则和旧版都需要）──
+    success_rules = [r for r in (cfg.get("success_rules") or []) if r.get("enabled") and (r.get("field") or "").strip()]
+    has_old = (cfg.get("success_field") or "").strip()
+
+    if not success_rules and not has_old:
+        return True, ""
+
     try:
         body = resp.json()
     except Exception:
-        return False, f"响应体非 JSON，无法按字段 '{field}' 判断"
-
+        return False, "响应体非 JSON，无法按字段判断"
     if not isinstance(body, dict):
-        return False, f"响应体不是 JSON 对象，无法按字段 '{field}' 判断"
+        return False, "响应体不是 JSON 对象，无法按字段判断"
 
+    # ── 新版多规则（全部启用规则必须通过）──
+    if success_rules:
+        for rule in success_rules:
+            field = rule["field"].strip()
+            op = rule.get("op", "eq")
+            expected = (rule.get("value") or "").strip()
+            if field not in body:
+                return False, f"响应体中不存在字段 '{field}'"
+            passed, reason = _apply_op(body[field], op, expected)
+            if not passed:
+                return False, reason
+        return True, ""
+
+    # ── 旧版单字段兼容 ──
+    field = has_old
+    expected_raw = (cfg.get("success_value") or "").strip()
     actual = body.get(field)
     if actual is None:
         return False, f"响应体中不存在字段 '{field}'"
-
-    # 将实际值转为字符串做宽松比较（兼容 true/True/1/"true"/"1" 等）
-    actual_str = str(actual).lower()
-    expected_str = expected_raw.lower()
-
-    # 特殊处理：true/false 布尔兼容
-    bool_map = {"true": True, "1": True, "false": False, "0": False}
-    actual_norm = bool_map.get(actual_str, actual_str)
-    expected_norm = bool_map.get(expected_str, expected_str)
-
-    if actual_norm == expected_norm:
-        return True, ""
-    return False, f"响应字段 '{field}'={actual!r}，期望值={expected_raw!r}"
+    passed, reason = _apply_op(actual, "eq", expected_raw)
+    if not passed:
+        return False, f"响应字段 '{field}'={actual!r}，期望值={expected_raw!r}"
+    return True, ""
 
 
-def _do_upload(url: str, headers: dict[str, str], payload: dict[str, Any], retry: int, cfg: dict[str, Any]) -> tuple[bool, str]:
+def _extract_custom_params(cfg: dict[str, Any]) -> tuple[dict[str, str], dict[str, str]]:
+    """
+    从配置中提取自定义 header 和 body 参数。
+    优先读取新版 custom_params 列表；若为空则兼容旧版 headers / extra_fields。
+    返回 (extra_headers, extra_body_fields)
+    """
+    custom_params = cfg.get("custom_params") or []
+    if custom_params:
+        extra_headers: dict[str, str] = {}
+        extra_body: dict[str, str] = {}
+        for p in custom_params:
+            k = (p.get("key") or "").strip()
+            if not k:
+                continue
+            v = str(p.get("value") or "")
+            if p.get("type") == "body":
+                extra_body[k] = v
+            else:
+                extra_headers[k] = v
+        return extra_headers, extra_body
+    # 兼容旧配置
+    old_headers = {k: str(v) for k, v in (cfg.get("headers") or {}).items()}
+    old_body = {k: str(v) for k, v in (cfg.get("extra_fields") or {}).items() if str(k).strip()}
+    return old_headers, old_body
+
+
+
     """执行 HTTP POST 上传，失败时重试，根据 cfg 中的成功判断规则决定是否成功"""
     err = "未知错误"
     for attempt in range(max(1, retry)):
@@ -538,7 +611,8 @@ def _upload_unsynced_with_logs() -> dict[str, Any]:
     _push_log(f"开始上传：{len(unsynced)} 条未同步记录（{len(by_conv)} 个会话）", "info")
 
     url = cfg["url"].strip()
-    headers = {k: str(v) for k, v in (cfg.get("headers") or {}).items()}
+    extra_headers, extra_body = _extract_custom_params(cfg)
+    headers = extra_headers
     headers.setdefault("Content-Type", "application/json")
     retry = int(cfg.get("retry_times", 3))
     machine = collect_machine_info()
@@ -561,6 +635,9 @@ def _upload_unsynced_with_logs() -> dict[str, Any]:
             continue
 
         payload = {
+            **extra_body,
+            "platform": cfg.get("platform_value", "WorkBuddy"),
+            "union_id": cfg.get("union_id", "").strip(),
             "conversationId": cid,
             "timestamp": int(time.time() * 1000),
             "machine": machine,
@@ -604,7 +681,8 @@ def upload_unsynced(conversation_id: str | None = None) -> dict[str, Any]:
         return {"uploaded": 0, "failed": 0, "error": None}
 
     url = cfg["url"].strip()
-    headers = {k: str(v) for k, v in (cfg.get("headers") or {}).items()}
+    extra_headers, extra_body = _extract_custom_params(cfg)
+    headers = extra_headers
     headers.setdefault("Content-Type", "application/json")
     retry = int(cfg.get("retry_times", 3))
     machine = collect_machine_info()
@@ -634,6 +712,9 @@ def upload_unsynced(conversation_id: str | None = None) -> dict[str, Any]:
             continue
 
         payload = {
+            **extra_body,
+            "platform": cfg.get("platform_value", "WorkBuddy"),
+            "union_id": cfg.get("union_id", "").strip(),
             "conversationId": cid,
             "timestamp": int(time.time() * 1000),
             "machine": machine,
@@ -763,7 +844,11 @@ def preview_upload_payload(conversation_id: str, max_messages: int = 3) -> dict[
 
     machine = collect_machine_info()
 
+    _, extra_body = _extract_custom_params(cfg)
     payload = {
+        **extra_body,
+        "platform": cfg.get("platform_value", "WorkBuddy"),
+        "union_id": cfg.get("union_id", "").strip(),
         "conversationId": conversation_id,
         "timestamp": int(time.time() * 1000),
         "machine": machine,
@@ -782,3 +867,56 @@ def preview_upload_payload(conversation_id: str, max_messages: int = 3) -> dict[
             "include_assistant": cfg.get("include_assistant", False),
         },
     }
+
+
+# ═══════════════════════════════════════════════════════════════
+# 获取 union_id / 删除远端数据
+# ═══════════════════════════════════════════════════════════════
+
+def fetch_union_id(platform: str, url: str | None = None) -> dict[str, Any]:
+    """
+    通过指定地址（或已保存配置的 union_id_url）发送 GET 请求获取 union_id。
+    请求：GET {union_id_url}?platform={platform}
+    url 参数优先级高于已保存配置，用于前端「未保存时直接传地址」的场景。
+    """
+    cfg = load_config()
+    union_id_url = (url or cfg.get("union_id_url") or "").strip()
+    if not union_id_url:
+        return {"success": False, "error": "未配置获取 union_id 的地址"}
+
+    extra_headers, _ = _extract_custom_params(cfg)
+
+    try:
+        with httpx.Client(timeout=15, verify=False) as client:
+            resp = client.get(union_id_url, params={"platform": platform}, headers=extra_headers)
+        data = resp.json()
+        return {"success": True, "status_code": resp.status_code, "data": data}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+def delete_remote_data(platform: str, union_id: str, url: str | None = None) -> dict[str, Any]:
+    """
+    通过指定地址（或已保存配置的 delete_url）发送 POST 请求删除远端数据。
+    请求：POST {delete_url}，body: {"platform": platform, "union_id": union_id}
+    url 参数优先级高于已保存配置，用于前端「未保存时直接传地址」的场景。
+    """
+    cfg = load_config()
+    delete_url = (url or cfg.get("delete_url") or "").strip()
+    if not delete_url:
+        return {"success": False, "error": "未配置删除数据的地址"}
+
+    extra_headers, _ = _extract_custom_params(cfg)
+    extra_headers["Content-Type"] = "application/json"
+
+    try:
+        with httpx.Client(timeout=15, verify=False) as client:
+            resp = client.post(
+                delete_url,
+                json={"platform": platform, "union_id": union_id},
+                headers=extra_headers,
+            )
+        data = resp.json()
+        return {"success": True, "status_code": resp.status_code, "data": data}
+    except Exception as e:
+        return {"success": False, "error": str(e)}

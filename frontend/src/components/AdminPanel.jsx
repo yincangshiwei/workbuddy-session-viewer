@@ -11,7 +11,11 @@ const DEFAULT_CFG = {
   enabled: false,
   protocol: "https",
   url: "",
-  headers: {},
+  union_id_url: "",
+  delete_url: "",
+  union_id: "",
+  platform_value: "WorkBuddy",
+  custom_params: [],
   include_basic: true,
   include_full: false,
   include_user: true,
@@ -21,11 +25,12 @@ const DEFAULT_CFG = {
   success_field: "",
   success_value: "",
   success_http_codes: "",
+  success_rules: [],
 };
 
 const STEPS = [
   { key: "machine", label: "本机信息", icon: "🖥" },
-  { key: "config",  label: "上传配置", icon: "⚙️" },
+  { key: "config",  label: "服务配置", icon: "⚙️" },
   { key: "init",    label: "初始化",   icon: "⚡" },
   { key: "monitor", label: "启动监控", icon: "📡" },
 ];
@@ -78,37 +83,48 @@ function useMonitorConfig() {
   return { cfg, setCfg, loading, saving, error, saveOk, saveConfig };
 }
 
-// ── 响应示例输入 + 自动解析字段 ─────────────────────────────
+// ── 根据值类型推断可用运算符 ─────────────────────────────────
+function inferType(val) {
+  if (typeof val === "boolean") return "bool";
+  if (typeof val === "number") return "number";
+  return "string";
+}
+
+const OP_OPTIONS = {
+  bool:   [{ v: "eq", l: "等于" }, { v: "ne", l: "不等于" }],
+  number: [{ v: "eq", l: "等于" }, { v: "ne", l: "不等于" }, { v: "gt", l: "大于" },
+           { v: "gte", l: "大于等于" }, { v: "lt", l: "小于" }, { v: "lte", l: "小于等于" }],
+  string: [{ v: "eq", l: "等于" }, { v: "ne", l: "不等于" },
+           { v: "contains", l: "包含" }, { v: "not_contains", l: "不包含" }],
+};
+
+// ── 响应示例输入 + 自动生成规则行 ────────────────────────────
 function ResponseExampleInput({ cfg, setCfg }) {
   const [raw, setRaw] = useState("");
   const [parseErr, setParseErr] = useState("");
-  const [parsedKeys, setParsedKeys] = useState([]);
 
   function handleChange(val) {
     setRaw(val);
     setParseErr("");
-    setParsedKeys([]);
     if (!val.trim()) return;
     try {
       const obj = JSON.parse(val);
       if (typeof obj !== "object" || Array.isArray(obj)) {
-        setParseErr("需要是 JSON 对象格式，如 {\"success\":true}");
+        setParseErr('需要是 JSON 对象格式，如 {"success":true}');
         return;
       }
-      setParsedKeys(Object.keys(obj));
+      // 自动生成规则行（默认不启用，运算符按类型推断）
+      const newRules = Object.entries(obj).map(([k, v]) => ({
+        enabled: false,
+        field: k,
+        op: inferType(v) === "string" ? "eq" : "eq",
+        value: String(v),
+        _type: inferType(v),
+      }));
+      setCfg((p) => ({ ...p, success_rules: newRules }));
     } catch {
       setParseErr("JSON 格式有误，请检查");
     }
-  }
-
-  function pickKey(key, obj) {
-    // 自动填入字段名和示例值（转字符串）
-    const val = JSON.parse(raw)[key];
-    setCfg((p) => ({
-      ...p,
-      success_field: key,
-      success_value: String(val),
-    }));
   }
 
   return (
@@ -122,15 +138,8 @@ function ResponseExampleInput({ cfg, setCfg }) {
         spellCheck={false}
       />
       {parseErr && <div className="admin-hint" style={{ color: "#fc8181", marginTop: 4 }}>{parseErr}</div>}
-      {parsedKeys.length > 0 && (
-        <div className="admin-parsed-keys">
-          <span className="admin-hint">点击字段自动填入：</span>
-          {parsedKeys.map((k) => (
-            <button key={k} className="admin-key-chip" onClick={() => pickKey(k)}>
-              {k}
-            </button>
-          ))}
-        </div>
+      {!parseErr && raw.trim() && (
+        <div className="admin-hint" style={{ marginTop: 4 }}>已自动解析字段，请在下方启用并配置判断规则</div>
       )}
     </div>
   );
@@ -139,16 +148,19 @@ function ResponseExampleInput({ cfg, setCfg }) {
 // ── 当前生效规则预览 ─────────────────────────────────────────
 function SuccessRulePreview({ cfg }) {
   const parts = [];
-  if (cfg.success_http_codes.trim()) {
+  if ((cfg.success_http_codes || "").trim()) {
     parts.push(`HTTP 状态码在 [${cfg.success_http_codes.trim()}] 中`);
   }
-  if (cfg.success_field.trim() && cfg.success_value.trim()) {
+  const activeRules = (cfg.success_rules || []).filter((r) => r.enabled && r.field?.trim());
+  if (activeRules.length > 0) {
+    const opLabels = { eq: "=", ne: "≠", gt: ">", gte: "≥", lt: "<", lte: "≤", contains: "包含", not_contains: "不包含" };
+    activeRules.forEach((r) => {
+      parts.push(`${r.field} ${opLabels[r.op] || r.op} ${r.value}`);
+    });
+  } else if ((cfg.success_field || "").trim() && (cfg.success_value || "").trim()) {
     parts.push(`响应体字段 "${cfg.success_field}" = ${cfg.success_value}`);
   }
-  if (parts.length === 0) {
-    parts.push("HTTP 状态码 < 400（默认）");
-  }
-
+  if (parts.length === 0) parts.push("HTTP 状态码 < 400（默认）");
   return (
     <div className="admin-success-preview">
       <span className="admin-hint">当前判断规则：</span>
@@ -158,14 +170,12 @@ function SuccessRulePreview({ cfg }) {
 }
 
 // ── Payload 预览组件 ─────────────────────────────────────────
-const PREVIEW_CONV_ID = "aaa94cd5c789493db44f390c20aaa634";
-
 function PayloadPreview() {
   const [preview, setPreview] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [convId, setConvId] = useState(PREVIEW_CONV_ID);
-  const [expanded, setExpanded] = useState(false);
+  const [convId, setConvId] = useState("");
+  const [expanded, setExpanded] = useState(true);
 
   async function fetchPreview() {
     setLoading(true);
@@ -237,18 +247,70 @@ export default function AdminPanel() {
   const { cfg, setCfg, loading, saving, error: cfgError, saveOk, saveConfig } = useMonitorConfig();
   const [activeStep, setActiveStep] = useState("machine");
 
-  // 请求头
-  const [headerRows, setHeaderRows] = useState([{ key: "", value: "" }]);
+  // 自定义参数（合并 header + body）
+  const [customParamRows, setCustomParamRows] = useState([{ key: "", value: "", desc: "", type: "header" }]);
   useEffect(() => {
-    const rows = Object.entries(cfg.headers || {}).map(([k, v]) => ({ key: k, value: v }));
-    setHeaderRows(rows.length > 0 ? rows : [{ key: "", value: "" }]);
-  }, [cfg.headers]);
-  function headersFromRows() {
-    const h = {};
-    headerRows.forEach(({ key, value }) => { if (key.trim()) h[key.trim()] = value; });
-    return h;
+    const rows = (cfg.custom_params || []).map((p) => ({
+      key: p.key || "", value: p.value || "", desc: p.desc || "", type: p.type || "header",
+    }));
+    setCustomParamRows(rows.length > 0 ? rows : [{ key: "", value: "", desc: "", type: "header" }]);
+  }, [cfg.custom_params]);
+  function customParamsFromRows() {
+    return customParamRows.filter((r) => r.key.trim()).map((r) => ({
+      key: r.key.trim(), value: r.value, desc: r.desc, type: r.type,
+    }));
   }
-  function handleSave() { saveConfig({ ...cfg, headers: headersFromRows() }); }
+
+  function handleSave() { saveConfig({ ...cfg, custom_params: customParamsFromRows() }); }
+
+  // union_id 获取
+  const [unionIdLoading, setUnionIdLoading] = useState(false);
+  const [unionIdResult, setUnionIdResult] = useState(null); // {success, data, error}
+  async function handleFetchUnionId() {
+    setUnionIdLoading(true);
+    setUnionIdResult(null);
+    try {
+      const platform = cfg.platform_value || "WorkBuddy";
+      const url = cfg.union_id_url.trim();
+      const r = await fetch(
+        `/api/admin/monitor/union-id?platform=${encodeURIComponent(platform)}&url=${encodeURIComponent(url)}`
+      );
+      const d = await r.json();
+      setUnionIdResult(d);
+    } catch (e) {
+      setUnionIdResult({ success: false, error: e.message });
+    } finally {
+      setUnionIdLoading(false);
+    }
+  }
+
+  // 删除远端数据
+  const [deleteLoading, setDeleteLoading] = useState(false);
+  const [deleteResult, setDeleteResult] = useState(null);
+  async function handleDeleteRemote() {
+    const unionId = cfg.union_id || "";
+    if (!unionId.trim()) return;
+    if (!window.confirm(`确认要删除远端数据吗？\nplatform: ${cfg.platform_value}\nunion_id: ${unionId}`)) return;
+    setDeleteLoading(true);
+    setDeleteResult(null);
+    try {
+      const r = await fetch("/api/admin/monitor/delete-data", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          platform: cfg.platform_value || "WorkBuddy",
+          union_id: unionId,
+          url: cfg.delete_url.trim(),
+        }),
+      });
+      const d = await r.json();
+      setDeleteResult(d);
+    } catch (e) {
+      setDeleteResult({ success: false, error: e.message });
+    } finally {
+      setDeleteLoading(false);
+    }
+  }
 
   // 本机信息
   const [machineInfo, setMachineInfo] = useState(null);
@@ -266,13 +328,15 @@ export default function AdminPanel() {
 
   // 同步状态
   const [syncStats, setSyncStats] = useState(null);
-  async function fetchStats() {
+  const fetchStatsRef = useRef(null);
+  const fetchStats = useCallback(async () => {
     try {
       const r = await fetch("/api/admin/monitor/stats");
       if (r.ok) setSyncStats(await r.json());
     } catch (_) {}
-  }
-  useEffect(() => { fetchStats(); }, []);
+  }, []);
+  fetchStatsRef.current = fetchStats;
+  useEffect(() => { fetchStats(); }, [fetchStats]);
 
   // 初始化
   const [initializing, setInitializing] = useState(false);
@@ -310,7 +374,7 @@ export default function AdminPanel() {
     setMonitorLog((prev) => [...prev, { ts, msg, type }].slice(-300));
   }, []);
 
-  // 拉取后端实时日志（增量）
+  // 拉取后端实时日志（增量），有新日志时顺带刷新统计
   async function pullLiveLogs() {
     try {
       const r = await fetch(`/api/admin/monitor/live-logs?since=${liveLogSinceRef.current}`);
@@ -321,6 +385,8 @@ export default function AdminPanel() {
           addLog(entry.msg, entry.type || "info");
           liveLogSinceRef.current = entry.id;
         });
+        // 有新日志说明后端正在处理，顺带刷新同步统计
+        fetchStatsRef.current?.();
       }
     } catch (_) {}
   }
@@ -382,8 +448,11 @@ export default function AdminPanel() {
     if (abortCtrlRef.current) { abortCtrlRef.current.abort(); abortCtrlRef.current = null; }
     // 通知后端取消正在执行的轮询/上传
     fetch("/api/admin/monitor/stop", { method: "POST" }).catch(() => {});
-    // 停止前最后拉一次日志
-    pullLiveLogs().finally(() => stopLiveLogPolling());
+    // 停止前最后拉一次日志，并刷新统计
+    pullLiveLogs().finally(() => {
+      stopLiveLogPolling();
+      fetchStatsRef.current?.();
+    });
     setMonitorRunning(false);
     addLog("监控已停止", "info");
   }
@@ -399,12 +468,12 @@ export default function AdminPanel() {
 
   if (loading) return <div className="admin-panel"><div className="empty-state">配置加载中...</div></div>;
 
-  const canStartMonitor = cfg.enabled && cfg.url.trim() && syncStats && syncStats.total > 0;
+  const canStartMonitor = cfg.enabled && cfg.url.trim() && cfg.union_id.trim() && syncStats && syncStats.total > 0;
 
   // ── 步骤状态徽标 ──────────────────────────────────────────
   function stepBadge(key) {
     if (key === "machine") return machineInfo ? "ok" : "warn";
-    if (key === "config")  return (cfg.enabled && cfg.url.trim()) ? "ok" : "warn";
+    if (key === "config")  return (cfg.enabled && cfg.url.trim() && cfg.union_id.trim()) ? "ok" : "warn";
     if (key === "init")    return syncStats && syncStats.total > 0 ? "ok" : "warn";
     if (key === "monitor") return monitorRunning ? "running" : "idle";
     return "idle";
@@ -450,14 +519,20 @@ export default function AdminPanel() {
           </div>
         );
 
-      // ── 上传配置 ──
+      // ── 服务配置 ──
       case "config":
         return (
           <div className="admin-content-body">
-            <div className="admin-content-title">⚙️ 上传配置</div>
-            <p className="admin-content-desc">配置完成后点击「保存配置」，修改数据范围后需重新执行初始化。</p>
+            <div className="admin-content-title" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <span>⚙️ 服务配置</span>
+              <button className="btn-primary" onClick={handleSave} disabled={saving} style={{ padding: "6px 16px", fontSize: "13px" }}>
+                {saving ? "保存中..." : saveOk ? "✓ 已保存" : "保存配置"}
+              </button>
+            </div>
+            <p className="admin-content-desc">修改数据范围后需重新执行初始化。</p>
             {cfgError ? <div className="error" style={{ marginBottom: 12 }}>{cfgError}</div> : null}
 
+            {/* ── 第一区：基础开关 + 协议 ── */}
             <div className="admin-config-grid">
               <div className="admin-config-row full">
                 <label className="admin-label">
@@ -480,14 +555,125 @@ export default function AdminPanel() {
                 <input type="number" className="admin-input" min={1} max={10} value={cfg.retry_times}
                   onChange={(e) => setCfg((p) => ({ ...p, retry_times: Number(e.target.value) }))} />
               </div>
+            </div>
 
+            {/* ── 第二区：三套服务地址 ── */}
+            <div className="admin-section-title" style={{ margin: "18px 0 10px" }}>服务地址配置</div>
+            <div className="admin-config-grid">
+
+              {/* 1. 获取 union_id 地址 */}
               <div className="admin-config-row full">
-                <label className="admin-label-text">目标上传地址</label>
+                <label className="admin-label-text">
+                  获取 union_id 地址
+                  <span className="admin-hint" style={{ marginLeft: 8 }}>GET 请求，自动携带 platform 参数</span>
+                </label>
+                <div style={{ display: "flex", gap: "10px" }}>
+                  <input type="text" className="admin-input" style={{ flex: 1 }}
+                    placeholder="例如：https://your-server.com/api/union-id"
+                    value={cfg.union_id_url}
+                    onChange={(e) => setCfg((p) => ({ ...p, union_id_url: e.target.value }))} />
+                  <button
+                    className="btn-outline"
+                    style={{ whiteSpace: "nowrap" }}
+                    onClick={handleFetchUnionId}
+                    disabled={unionIdLoading || !cfg.union_id_url.trim()}
+                  >
+                    {unionIdLoading ? "获取中..." : "获取 union_id"}
+                  </button>
+                </div>
+              </div>
+
+              {/* 获取 union_id 操作区 */}
+              {unionIdResult && (
+                <div className="admin-config-row full">
+                  <div className="admin-union-id-box">
+                    {unionIdResult.success ? (
+                      <div>
+                        <div className="admin-hint" style={{ color: "#68d391", marginBottom: 4 }}>
+                          ✓ 请求成功（HTTP {unionIdResult.status_code}）
+                        </div>
+                        <pre className="admin-payload-json" style={{ maxHeight: 120 }}>
+                          {JSON.stringify(unionIdResult.data, null, 2)}
+                        </pre>
+                        <div className="admin-hint" style={{ marginTop: 4 }}>
+                          请将响应中的 union_id 值填入下方输入框，或手动复制填写。
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="admin-hint" style={{ color: "#fc8181" }}>
+                        ✗ 请求失败：{unionIdResult.error}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* 当前 union_id */}
+              <div className="admin-config-row full">
+                <label className="admin-label-text">
+                  当前 union_id
+                  {cfg.union_id && <span className="admin-badge-ok" style={{ marginLeft: 8 }}>已获取</span>}
+                </label>
+                <input
+                  type="text"
+                  className="admin-input"
+                  placeholder="手动填入，或点击上方「获取 union_id」按钮后根据响应结果填入"
+                  value={cfg.union_id}
+                  onChange={(e) => setCfg((p) => ({ ...p, union_id: e.target.value }))}
+                />
+              </div>
+
+              {/* 2. 上传数据地址 */}
+              <div className="admin-config-row full" style={{ opacity: cfg.union_id.trim() ? 1 : 0.5 }}>
+                <label className="admin-label-text">
+                  上传数据地址
+                  <span className="admin-hint" style={{ marginLeft: 8 }}>POST 请求，上传会话消息数据</span>
+                  {!cfg.union_id.trim() && <span className="admin-hint" style={{ marginLeft: 8, color: "#f6ad55" }}>⚠ 需先填写 union_id</span>}
+                </label>
                 <input type="text" className="admin-input"
                   placeholder="例如：https://your-server.com/api/collect"
                   value={cfg.url}
+                  disabled={!cfg.union_id.trim()}
                   onChange={(e) => setCfg((p) => ({ ...p, url: e.target.value }))} />
               </div>
+
+              {/* 3. 删除数据地址 */}
+              <div className="admin-config-row full" style={{ opacity: cfg.union_id.trim() ? 1 : 0.5 }}>
+                <label className="admin-label-text">
+                  删除数据地址
+                  <span className="admin-hint" style={{ marginLeft: 8 }}>POST 请求，传 platform 和 union_id</span>
+                  {!cfg.union_id.trim() && <span className="admin-hint" style={{ marginLeft: 8, color: "#f6ad55" }}>⚠ 需先填写 union_id</span>}
+                </label>
+                <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
+                  <input type="text" className="admin-input" style={{ flex: 1 }}
+                    placeholder="例如：https://your-server.com/api/delete"
+                    value={cfg.delete_url}
+                    disabled={!cfg.union_id.trim()}
+                    onChange={(e) => setCfg((p) => ({ ...p, delete_url: e.target.value }))} />
+                  {cfg.union_id.trim() && cfg.delete_url.trim() && (
+                    <button
+                      className="btn-outline"
+                      style={{ color: "#fc8181", borderColor: "#fc8181", whiteSpace: "nowrap" }}
+                      onClick={handleDeleteRemote}
+                      disabled={deleteLoading}
+                    >
+                      {deleteLoading ? "删除中..." : "🗑 执行删除数据"}
+                    </button>
+                  )}
+                </div>
+                {deleteResult && (
+                  <div style={{ marginTop: 4 }}>
+                    <span className="admin-hint" style={{ color: deleteResult.success ? "#68d391" : "#fc8181" }}>
+                      {deleteResult.success ? `✓ 删除成功（HTTP ${deleteResult.status_code}）` : `✗ ${deleteResult.error}`}
+                    </span>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* ── 第三区：数据范围 + 自定义参数 ── */}
+            <div className="admin-section-title" style={{ margin: "18px 0 10px" }}>上传数据配置</div>
+            <div className="admin-config-grid">
 
               <div className="admin-config-row full">
                 <div className="admin-label-text">上传数据范围</div>
@@ -522,21 +708,83 @@ export default function AdminPanel() {
               </div>
 
               <div className="admin-config-row full">
-                <div className="admin-label-text">自定义请求头（可选，如鉴权 Token）</div>
-                {headerRows.map((row, i) => (
-                  <div key={i} className="admin-header-row">
-                    <input className="admin-input admin-input-sm" placeholder="Header 名称" value={row.key}
-                      onChange={(e) => { const n = [...headerRows]; n[i] = { ...n[i], key: e.target.value }; setHeaderRows(n); }} />
-                    <span className="admin-header-sep">:</span>
-                    <input className="admin-input" placeholder="Header 值" value={row.value}
-                      onChange={(e) => { const n = [...headerRows]; n[i] = { ...n[i], value: e.target.value }; setHeaderRows(n); }} />
-                    <button className="btn-outline admin-btn-sm"
-                      onClick={() => setHeaderRows((p) => p.filter((_, idx) => idx !== i))}
-                      disabled={headerRows.length <= 1}>✕</button>
+                <div className="admin-label-text">自定义参数</div>
+                <div className="admin-success-judge-desc" style={{ marginBottom: 10 }}>
+                  可附加任意自定义参数。<strong>Header</strong> 类型将追加到 HTTP 请求头（如鉴权 Token）；<strong>Body</strong> 类型将作为顶层字段合并到上传的 JSON 中（已内置 <code>platform</code> 和 <code>union_id</code>）。
+                </div>
+                <div className="admin-custom-params-header">
+                  <span style={{ flex: "0 0 160px" }}>参数名</span>
+                  <span style={{ flex: 1 }}>参数值</span>
+                  <span style={{ flex: 1 }}>参数说明</span>
+                  <span style={{ flex: "0 0 90px" }}>类型</span>
+                  <span style={{ flex: "0 0 32px" }} />
+                </div>
+                {/* ── 固定参数：platform ── */}
+                <div className="admin-custom-param-row">
+                  <input className="admin-input admin-input-sm"
+                    style={{ flex: "0 0 160px", opacity: 0.5, cursor: "not-allowed" }}
+                    value="platform" readOnly />
+                  <input className="admin-input" style={{ flex: 1 }}
+                    placeholder="参数值"
+                    value={cfg.platform_value ?? "WorkBuddy"}
+                    onChange={(e) => setCfg((p) => ({ ...p, platform_value: e.target.value }))} />
+                  <input className="admin-input"
+                    style={{ flex: 1, opacity: 0.5, cursor: "not-allowed" }}
+                    value="平台标识，固定为 Body 参数" readOnly />
+                  <select className="admin-select"
+                    style={{ flex: "0 0 90px", opacity: 0.5, cursor: "not-allowed" }}
+                    value="body" disabled>
+                    <option value="body">Body</option>
+                  </select>
+                  <button className="btn-outline admin-btn-sm"
+                    style={{ flex: "0 0 32px", opacity: 0.3, cursor: "not-allowed" }} disabled>✕</button>
+                </div>
+                {/* ── 固定参数：union_id ── */}
+                <div className="admin-custom-param-row">
+                  <input className="admin-input admin-input-sm"
+                    style={{ flex: "0 0 160px", opacity: 0.5, cursor: "not-allowed" }}
+                    value="union_id" readOnly />
+                  <input className="admin-input" style={{ flex: 1, opacity: 0.5, cursor: "not-allowed" }}
+                    placeholder="尚未获取"
+                    value={cfg.union_id} readOnly />
+                  <input className="admin-input"
+                    style={{ flex: 1, opacity: 0.5, cursor: "not-allowed" }}
+                    value="从服务地址配置处获取的值，固定为 Body 参数" readOnly />
+                  <select className="admin-select"
+                    style={{ flex: "0 0 90px", opacity: 0.5, cursor: "not-allowed" }}
+                    value="body" disabled>
+                    <option value="body">Body</option>
+                  </select>
+                  <button className="btn-outline admin-btn-sm"
+                    style={{ flex: "0 0 32px", opacity: 0.3, cursor: "not-allowed" }} disabled>✕</button>
+                </div>
+                {/* ── 用户自定义参数 ── */}
+                {customParamRows.map((row, i) => (
+                  <div key={i} className="admin-custom-param-row">
+                    <input className="admin-input admin-input-sm" style={{ flex: "0 0 160px" }}
+                      placeholder="参数名" value={row.key}
+                      onChange={(e) => { const n = [...customParamRows]; n[i] = { ...n[i], key: e.target.value }; setCustomParamRows(n); }} />
+                    <input className="admin-input" style={{ flex: 1 }}
+                      placeholder="参数值" value={row.value}
+                      onChange={(e) => { const n = [...customParamRows]; n[i] = { ...n[i], value: e.target.value }; setCustomParamRows(n); }} />
+                    <input className="admin-input" style={{ flex: 1 }}
+                      placeholder="说明（可选）" value={row.desc}
+                      onChange={(e) => { const n = [...customParamRows]; n[i] = { ...n[i], desc: e.target.value }; setCustomParamRows(n); }} />
+                    <select className="admin-select" style={{ flex: "0 0 90px" }}
+                      value={row.type}
+                      onChange={(e) => { const n = [...customParamRows]; n[i] = { ...n[i], type: e.target.value }; setCustomParamRows(n); }}>
+                      <option value="header">Header</option>
+                      <option value="body">Body</option>
+                    </select>
+                    <button className="btn-outline admin-btn-sm" style={{ flex: "0 0 32px" }}
+                      onClick={() => setCustomParamRows((p) => p.filter((_, idx) => idx !== i))}
+                      disabled={customParamRows.length <= 1}>✕</button>
                   </div>
                 ))}
-                <button className="btn-outline admin-btn-sm"
-                  onClick={() => setHeaderRows((p) => [...p, { key: "", value: "" }])}>+ 添加请求头</button>
+                <button className="btn-outline admin-btn-sm" style={{ marginTop: 6 }}
+                  onClick={() => setCustomParamRows((p) => [...p, { key: "", value: "", desc: "", type: "header" }])}>
+                  + 添加参数
+                </button>
               </div>
 
               {/* ── 响应成功判断 ── */}
@@ -544,10 +792,8 @@ export default function AdminPanel() {
                 <div className="admin-label-text">响应成功判断</div>
                 <div className="admin-success-judge-box">
                   <div className="admin-success-judge-desc">
-                    填写服务响应示例，系统自动解析字段名用于判断请求是否成功。未配置时默认以 HTTP 状态码 &lt;400 为成功。
+                    填写服务响应示例 JSON，系统自动解析所有字段并生成判断规则。勾选启用的规则，所有启用规则均满足才视为成功。未配置时默认以 HTTP 状态码 &lt;400 为成功。
                   </div>
-
-                  {/* 响应示例输入 */}
                   <div className="admin-success-example-row">
                     <div className="admin-label-text" style={{ marginBottom: 6 }}>
                       响应示例 JSON
@@ -557,50 +803,48 @@ export default function AdminPanel() {
                     </div>
                     <ResponseExampleInput cfg={cfg} setCfg={setCfg} />
                   </div>
-
-                  {/* 字段 + 期望值 */}
-                  <div className="admin-success-field-row">
-                    <div style={{ flex: 1 }}>
-                      <div className="admin-label-text" style={{ marginBottom: 4 }}>判断字段名</div>
-                      <input
-                        className="admin-input"
-                        placeholder='如 success 或 code'
-                        value={cfg.success_field}
-                        onChange={(e) => setCfg((p) => ({ ...p, success_field: e.target.value }))}
-                      />
+                  {(cfg.success_rules || []).length > 0 && (
+                    <div style={{ marginTop: 10 }}>
+                      <div className="admin-custom-params-header">
+                        <span style={{ flex: "0 0 24px" }} />
+                        <span style={{ flex: "0 0 130px" }}>字段名</span>
+                        <span style={{ flex: "0 0 110px" }}>运算符</span>
+                        <span style={{ flex: 1 }}>期望值</span>
+                      </div>
+                      {(cfg.success_rules || []).map((rule, i) => {
+                        const valType = rule._type || inferType(isNaN(Number(rule.value)) ? rule.value : Number(rule.value));
+                        const ops = OP_OPTIONS[valType] || OP_OPTIONS.string;
+                        return (
+                          <div key={i} className="admin-custom-param-row" style={{ alignItems: "center" }}>
+                            <input type="checkbox" style={{ flex: "0 0 24px", cursor: "pointer" }}
+                              checked={!!rule.enabled}
+                              onChange={(e) => { const n = [...cfg.success_rules]; n[i] = { ...n[i], enabled: e.target.checked }; setCfg((p) => ({ ...p, success_rules: n })); }} />
+                            <input className="admin-input admin-input-sm"
+                              style={{ flex: "0 0 130px", opacity: 0.7, cursor: "not-allowed" }}
+                              value={rule.field} readOnly />
+                            <select className="admin-select" style={{ flex: "0 0 110px" }}
+                              value={rule.op} disabled={!rule.enabled}
+                              onChange={(e) => { const n = [...cfg.success_rules]; n[i] = { ...n[i], op: e.target.value }; setCfg((p) => ({ ...p, success_rules: n })); }}>
+                              {ops.map((o) => <option key={o.v} value={o.v}>{o.l}</option>)}
+                            </select>
+                            <input className="admin-input" style={{ flex: 1 }}
+                              placeholder="期望值" value={rule.value} disabled={!rule.enabled}
+                              onChange={(e) => { const n = [...cfg.success_rules]; n[i] = { ...n[i], value: e.target.value }; setCfg((p) => ({ ...p, success_rules: n })); }} />
+                          </div>
+                        );
+                      })}
                     </div>
-                    <div className="admin-success-eq">=</div>
-                    <div style={{ flex: 1 }}>
-                      <div className="admin-label-text" style={{ marginBottom: 4 }}>成功时的值</div>
-                      <input
-                        className="admin-input"
-                        placeholder='如 true 或 0'
-                        value={cfg.success_value}
-                        onChange={(e) => setCfg((p) => ({ ...p, success_value: e.target.value }))}
-                      />
-                    </div>
-                  </div>
-
-                  {/* 分隔 */}
-                  <div className="admin-success-or">
-                    <span>或</span>
-                  </div>
-
-                  {/* 状态码 */}
+                  )}
+                  <div className="admin-success-or"><span>或</span></div>
                   <div>
                     <div className="admin-label-text" style={{ marginBottom: 4 }}>
                       指定成功 HTTP 状态码
                       <span className="admin-hint" style={{ marginLeft: 8 }}>逗号分隔，如 200,201；为空则 &lt;400 即成功</span>
                     </div>
-                    <input
-                      className="admin-input"
-                      placeholder="200,201"
+                    <input className="admin-input" placeholder="200,201"
                       value={cfg.success_http_codes}
-                      onChange={(e) => setCfg((p) => ({ ...p, success_http_codes: e.target.value }))}
-                    />
+                      onChange={(e) => setCfg((p) => ({ ...p, success_http_codes: e.target.value }))} />
                   </div>
-
-                  {/* 当前生效规则预览 */}
                   <SuccessRulePreview cfg={cfg} />
                 </div>
               </div>
@@ -690,9 +934,10 @@ export default function AdminPanel() {
             </p>
 
             {/* 前置检查提示 */}
-            {!cfg.enabled && <div className="admin-preflight-warn">⚠ 请先在「上传配置」中启用监控上传并保存</div>}
-            {cfg.enabled && !cfg.url.trim() && <div className="admin-preflight-warn">⚠ 请先在「上传配置」中填写目标上传地址并保存</div>}
-            {cfg.enabled && cfg.url.trim() && syncStats && syncStats.total === 0 && (
+            {!cfg.enabled && <div className="admin-preflight-warn">⚠ 请先在「服务配置」中启用监控上传并保存</div>}
+            {cfg.enabled && !cfg.url.trim() && <div className="admin-preflight-warn">⚠ 请先在「服务配置」中填写上传数据地址并保存</div>}
+            {cfg.enabled && cfg.url.trim() && !cfg.union_id.trim() && <div className="admin-preflight-warn">⚠ 请先在「服务配置」中获取并填写 union_id</div>}
+            {cfg.enabled && cfg.url.trim() && cfg.union_id.trim() && syncStats && syncStats.total === 0 && (
               <div className="admin-preflight-warn">⚠ DB 中暂无数据，请先执行「初始化」</div>
             )}
 

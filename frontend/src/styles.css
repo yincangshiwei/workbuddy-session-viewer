@@ -326,8 +326,13 @@ tr.row-selected:hover td { background: #2c4a67; }
 
 /* 旧 section 样式保留兼容 */
 .admin-section { background: #1e2533; border: 1px solid #2d3748; border-radius: 10px; padding: 18px; margin-bottom: 20px; }
-.admin-section-title { font-size: 15px; font-weight: 600; color: #90cdf4; margin-bottom: 6px; }
+.admin-section-title { font-size: 15px; font-weight: 600; color: #90cdf4; margin-bottom: 6px; border-bottom: 1px solid #2d3748; padding-bottom: 6px; }
 .admin-section-desc { font-size: 12px; color: #718096; margin-bottom: 16px; line-height: 1.6; }
+
+/* union_id 获取区域 */
+.admin-union-id-box { background: #1a2035; border: 1px solid #2d3748; border-radius: 8px; padding: 14px; }
+.admin-union-id-row { display: flex; align-items: flex-end; gap: 10px; }
+.admin-badge-ok { display: inline-block; background: #276749; color: #68d391; font-size: 11px; padding: 1px 8px; border-radius: 10px; font-weight: 600; vertical-align: middle; }
 
 .admin-config-grid { display: flex; flex-direction: column; gap: 14px; margin-bottom: 16px; }
 .admin-config-row { display: flex; flex-direction: column; gap: 6px; }
@@ -355,6 +360,9 @@ tr.row-selected:hover td { background: #2c4a67; }
 .btn-primary:disabled { opacity: 0.55; cursor: not-allowed; }
 
 .admin-preflight-warn { font-size: 12px; color: #f6ad55; background: rgba(246,173,85,0.08); border: 1px solid rgba(246,173,85,0.25); border-radius: 6px; padding: 7px 12px; margin-bottom: 12px; }
+
+.admin-custom-params-header { display: flex; align-items: center; gap: 6px; padding: 4px 0 6px; font-size: 11px; color: #718096; font-weight: 500; }
+.admin-custom-param-row { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
 
 .admin-monitor-ctrl { margin-bottom: 10px; }
 .admin-monitor-status { display: flex; align-items: center; gap: 8px; font-size: 13px; color: #a0aec0; margin-bottom: 10px; }

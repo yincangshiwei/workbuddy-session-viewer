@@ -13,7 +13,14 @@ _DEFAULT_CONFIG: dict[str, Any] = {
     "enabled": False,
     "protocol": "https",         # http | https
     "url": "",                   # 目标上传地址
-    "headers": {},               # 自定义请求头（如鉴权 token）
+    "union_id_url": "",          # 获取 union_id 地址（GET 请求，传 platform 参数）
+    "delete_url": "",            # 删除数据地址（POST 请求，传 platform 和 union_id 参数）
+    "union_id": "",              # 已获取的 union_id（缓存）
+    "headers": {},               # 已废弃，由 custom_params 替代（保留用于旧配置迁移）
+    "extra_fields": {},          # 已废弃，由 custom_params 替代（保留用于旧配置迁移）
+    # 自定义参数列表，每项：{key, value, desc, type: "header"|"body"}
+    "custom_params": [],
+    "platform_value": "WorkBuddy",   # platform 固定参数的值（可在页面修改）
     "include_basic": True,       # 上传基础对话（user+assistant，仅文本）
     "include_full": False,       # 上传完整对话（含 tool 事件）
     "include_user": True,        # 包含 user 角色消息
@@ -21,11 +28,14 @@ _DEFAULT_CONFIG: dict[str, Any] = {
     "batch_size": 50,            # 每批最多消息数
     "retry_times": 3,            # 失败重试次数
     # ── 响应成功判断 ──────────────────────────────────────────
-    # 方式一：按响应体 JSON 字段判断
-    "success_field": "",         # 判断字段名，如 "success" 或 "code"
-    "success_value": "",         # 成功时该字段的值，如 "true" 或 "0"（字符串形式）
-    # 方式二：按 HTTP 状态码判断（逗号分隔，如 "200,201"；为空则 <400 即视为成功）
+    # 旧版单字段（保留兼容）
+    "success_field": "",
+    "success_value": "",
     "success_http_codes": "",
+    # 新版多规则（优先级高于旧版）
+    # 每项：{enabled, field, op, value}
+    # op: eq | ne | gt | gte | lt | lte | contains | not_contains
+    "success_rules": [],
 }
 
 
